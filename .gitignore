@@ -1,0 +1,77 @@
+# --- Python Base ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual Environments ---
+.venv/
+venv/
+ENV/
+env/
+venv.bak/
+ENV.bak/
+
+# --- IDEs & Editors ---
+.vscode/
+.kiro/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# --- Logs ---
+logs/
+*.log
+error_logs/
+
+# --- Media & Large Files (Crucial for Video Projects) ---
+# Ignore local video samples used for testing
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.flv
+*.wmv
+
+# --- Configuration & Secrets ---
+.env
+config_local.py
+secrets.json
+
+# --- PyInstaller & Distribution ---
+# If you want to keep your .spec files, comment the first line
+# *.spec
+# Already covered by Python base but kept for clarity
+build/
+dist/
+
+# --- OS Specific ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Project Specific Outputs ---
+# If your app creates snapshots or recordings
+recordings/
+snapshots/
