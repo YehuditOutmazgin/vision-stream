@@ -1,38 +1,34 @@
 """
-RTSP Stream Engine - Handles video decoding and frame processing using PyAV/FFmpeg.
+RTSP & Multi-Source Stream Engine - Handles video decoding using PyAV/FFmpeg.
+Supports RTSP, Local Webcams (dshow), and Video Files.
 """
 import av
 import av.error
 import threading
 import time
-from typing import Optional, Callable, Any
+import os
+from typing import Optional, Callable, Any, Dict
 import numpy as np
 from PySide6.QtCore import QObject, Signal
 from utils.logger import get_logger
 from utils.config import Config
+from core.frame_buffer import FrameBuffer
 
 logger = get_logger()
 
 class RTSPStreamEngine(QObject):
     """
-    RTSP Stream Engine for handling video decoding and frame processing.
+    Stream Engine for handling video decoding and frame processing.
     Uses PyAV/FFmpeg for ultra-low latency streaming with H.264/H.265 support.
-    Emits Qt signals for thread-safe communication with GUI.
+    Integrates FrameBuffer with Latest Frame Policy and Watchdog monitoring.
     """
     
-    # Qt Signals for GUI communication
-    frame_ready = Signal(np.ndarray)  # Emitted when new frame is ready
-    fps_updated = Signal(float)       # Emitted with FPS updates
-    error_occurred = Signal(str)      # Emitted on error
-    connection_established = Signal(dict)  # Emitted on successful connection
+    frame_ready = Signal(np.ndarray)
+    fps_updated = Signal(float)
+    error_occurred = Signal(str)
+    connection_established = Signal(dict)
     
     def __init__(self, rtsp_url: str):
-        """
-        Initialize the RTSP Stream Engine.
-        
-        Args:
-            rtsp_url: The RTSP stream URL
-        """
         super().__init__()
         self.rtsp_url = rtsp_url
         self.container = None
@@ -40,7 +36,7 @@ class RTSPStreamEngine(QObject):
         self.is_running = False
         self.capture_thread = None
         self.frame_callbacks = []
-        self.fps_callbacks = []  # Callbacks for FPS updates
+        self.fps_callbacks = []
         self.fps = 30
         self.frame_count = 0
         self.last_frame_time = time.time()
@@ -48,219 +44,151 @@ class RTSPStreamEngine(QObject):
         self.width = None
         self.height = None
         self.connection_timeout = Config.RTSP_TIMEOUT
-        self.interrupt_event = threading.Event()  # For graceful interruption
+        self.interrupt_event = threading.Event()
+        
+        # Frame buffer with watchdog
+        self.frame_buffer = FrameBuffer()
+        self.frame_buffer.on_frame_ready = self._on_frame_ready
+        self.frame_buffer.on_timeout = self._on_frame_timeout
         
     def add_frame_callback(self, callback: Callable[[np.ndarray], Any]):
-        """
-        Add a callback function to be called for each frame.
-        
-        Args:
-            callback: Function that takes a frame (numpy array) as input
-        """
         self.frame_callbacks.append(callback)
     
     def add_fps_callback(self, callback: Callable[[float], Any]):
-        """
-        Add a callback function to be called with FPS updates.
-        
-        Args:
-            callback: Function that takes FPS (float) as input
-        """
         self.fps_callbacks.append(callback)
         
     def remove_frame_callback(self, callback: Callable[[np.ndarray], Any]):
-        """
-        Remove a frame callback.
-        
-        Args:
-            callback: The callback function to remove
-        """
         if callback in self.frame_callbacks:
             self.frame_callbacks.remove(callback)
     
     def remove_fps_callback(self, callback: Callable[[float], Any]):
-        """
-        Remove an FPS callback.
-        
-        Args:
-            callback: The callback function to remove
-        """
         if callback in self.fps_callbacks:
             self.fps_callbacks.remove(callback)
+
     def start(self) -> bool:
         """
-        Start the RTSP stream or Local Webcam capture.
+        Start streaming from the provided source.
+        Supports RTSP, local files, and webcams.
+        
+        Returns:
+            True if stream started successfully, False otherwise
         """
         if self.is_running:
             logger.log_ui_event("Stream is already running")
             return True
             
         try:
-            # בדיקה האם מדובר במצלמה מקומית (מתחיל ב-video= או שזה רק מספר)
             is_webcam = "video=" in self.rtsp_url or self.rtsp_url.isdigit()
+            is_file = os.path.isfile(self.rtsp_url)
             
             options = Config.FFMPEG_OPTIONS.copy()
             
-            if is_webcam:
-                # הגדרות ספציפיות למצלמת מחשב בווינדוס
-                logger.log_ui_event(f"Attempting to open webcam: {self.rtsp_url}")
-                self.container = av.open(
-                    self.rtsp_url,
-                    format='dshow',  # חובה עבור מצלמות Windows
-                    options={'framerate': '30'} # מבקש מהמצלמה 30 FPS
-                )
-            else:
-                # הגדרות רגילות ל-RTSP
-                options.update({
-                    'rtsp_transport': 'tcp',
-                    'stimeout': '5000000',
-                    'allowed_media_types': 'video',
-                    'buffer_size': '2048000',
-                })
-                self.container = av.open(
-                    self.rtsp_url,
-                    options=options,
-                    timeout=self.connection_timeout
-                )
+            try:
+                if is_webcam:
+                    device_name = self.rtsp_url if "video=" in self.rtsp_url else f"video={self.rtsp_url}"
+                    logger.log_ui_event(f"Attempting to open webcam: {device_name}")
+                    self.container = av.open(
+                        device_name,
+                        format='dshow',
+                        options={'framerate': '30', 'video_size': '640x480'}
+                    )
+                elif is_file:
+                    logger.log_ui_event(f"Attempting to open local file: {self.rtsp_url}")
+                    self.container = av.open(self.rtsp_url)
+                else:
+                    options.update({
+                        'rtsp_transport': 'tcp',
+                        'stimeout': '5000000',
+                        'allowed_media_types': 'video',
+                        'buffer_size': '2048000',
+                    })
+                    self.container = av.open(
+                        self.rtsp_url,
+                        options=options,
+                        timeout=self.connection_timeout
+                    )
+            except Exception as e:
+                # Ensure container is closed if opening failed
+                if self.container:
+                    try:
+                        self.container.close()
+                    except:
+                        pass
+                    self.container = None
+                raise e
             
-            # Find video stream
             if not self.container or len(self.container.streams.video) == 0:
-                raise ValueError("No video streams found in the provided URL/Device")
+                raise ValueError("No video streams found in the provided source")
 
             self.stream = self.container.streams.video[0]
             
-            # Get codec information
+            if not self.stream:
+                raise ValueError("Failed to get video stream")
+            
             self.codec_name = self.stream.codec_context.name
             self.width = self.stream.width
             self.height = self.stream.height
             
-            # תיקון קטן עבור מצלמות שלא מדווחות FPS בצורה תקינה
             try:
                 self.fps = float(self.stream.average_rate) or 30
             except:
                 self.fps = 30
             
-            # Log connection and codec info
             logger.log_connection(self.rtsp_url)
             logger.log_codec_info(self.codec_name, f"{self.width}x{self.height}", int(self.fps))
             
-            # Emit connection established signal
             self.connection_established.emit({
                 'codec': self.codec_name,
                 'resolution': f"{self.width}x{self.height}",
                 'fps': int(self.fps)
             })
             
-            # בבדיקת מצלמה אנחנו מוותרים על בדיקת התמיכה ב-Codec כי זה משתנה בין מצלמות
-            if not is_webcam and self.codec_name.lower() not in Config.SUPPORTED_CODECS:
+            if not (is_webcam or is_file) and self.codec_name.lower() not in Config.SUPPORTED_CODECS:
                 logger.log_codec_error(self.codec_name)
                 self.error_occurred.emit(f"Unsupported codec: {self.codec_name}")
                 return False
             
             self.is_running = True
+            self.interrupt_event.clear()
             self.frame_count = 0
             self.last_frame_time = time.time()
+            
+            # Start watchdog monitoring
+            self.frame_buffer.start_watchdog()
             
             self.capture_thread = threading.Thread(
                 target=self._capture_frames,
                 daemon=True,
-                name="RTSPStreamCapture"
+                name="StreamCaptureThread"
             )
             self.capture_thread.start()
             
             return True
             
         except Exception as e:
-            logger.log_error("CONNECTION_ERROR", f"Failed to open stream: {e}", "ERR_STREAM_OPEN")
-            self.error_occurred.emit(f"Connection error: {str(e)}")
+            logger.log_error("CONNECTION_ERROR", f"Failed to open source: {e}")
+            self.error_occurred.emit(f"Source error: {str(e)}")
+            self.is_running = False
             return False
-    # def start(self) -> bool:
-    #     """
-    #     Start the RTSP stream capture with PyAV/FFmpeg.
-        
-    #     Returns:
-    #         True if stream started successfully, False otherwise
-    #     """
-    #     if self.is_running:
-    #         logger.log_ui_event("Stream is already running")
-    #         return True
-            
-    #     try:
-    #         # Open RTSP stream with low-latency FFmpeg options
-    #         options = Config.FFMPEG_OPTIONS.copy()
-    #         options.update({
-    #             'rtsp_transport': 'tcp',  # כפיית TCP למניעת "Invalid Data"
-    #             'stimeout': '5000000',  # פסק זמן של 5 שניות (במיקרו-שניות)
-    #             'allowed_media_types': 'video',  # התעלמות מאודיו כדי לחסוך משאבים
-    #             'buffer_size': '2048000',  # הגדלת באפר ליציבות
-    #         })
-    #         self.container = av.open(
-    #             self.rtsp_url,
-    #             options=options,
-    #             timeout=self.connection_timeout
-    #         )
-            
-    #         # Find video stream
-    #         if not self.container or len(self.container.streams.video) == 0:
-    #             raise ValueError("No video streams found in the provided URL")
 
-    #         self.stream = self.container.streams.video[0]
-            
-    #         # Get codec information
-    #         self.codec_name = self.stream.codec_context.name
-    #         self.width = self.stream.width
-    #         self.height = self.stream.height
-    #         self.fps = float(self.stream.average_rate) or 30
-            
-    #         # Log connection and codec info
-    #         logger.log_connection(self.rtsp_url)
-    #         logger.log_codec_info(
-    #             self.codec_name,
-    #             f"{self.width}x{self.height}",
-    #             int(self.fps)
-    #         )
-            
-    #         # Emit connection established signal
-    #         self.connection_established.emit({
-    #             'codec': self.codec_name,
-    #             'resolution': f"{self.width}x{self.height}",
-    #             'fps': int(self.fps)
-    #         })
-            
-    #         # Validate codec support
-    #         if self.codec_name.lower() not in Config.SUPPORTED_CODECS:
-    #             logger.log_codec_error(self.codec_name)
-    #             self.error_occurred.emit(f"Unsupported codec: {self.codec_name}")
-    #             return False
-            
-    #         self.is_running = True
-    #         self.frame_count = 0
-    #         self.last_frame_time = time.time()
-            
-    #         self.capture_thread = threading.Thread(
-    #             target=self._capture_frames,
-    #             daemon=True,
-    #             name="RTSPStreamCapture"
-    #         )
-    #         self.capture_thread.start()
-            
-    #         return True
-            
-    #     except Exception as e:
-    #         logger.log_error("CONNECTION_ERROR", f"Failed to open RTSP stream: {e}", "ERR_RTSP_OPEN")
-    #         self.error_occurred.emit(f"Connection error: {str(e)}")
-    #         return False
-    
     def stop(self):
         """
-        Stop the RTSP stream capture and release resources.
-        Signals interrupt event to allow graceful thread termination.
+        Stop the stream engine and cleanup resources.
+        Thread-safe: Signals capture thread to stop and waits for it.
+        Cleans up all callbacks and closes container.
         """
         self.is_running = False
-        self.interrupt_event.set()  # Signal interrupt to capture thread
+        self.interrupt_event.set()
+        
+        # Stop watchdog
+        self.frame_buffer.stop_watchdog()
         
         if self.capture_thread and self.capture_thread.is_alive():
             self.capture_thread.join(timeout=1.0)
+        
+        # Clear callbacks to prevent memory leaks
+        self.frame_callbacks.clear()
+        self.fps_callbacks.clear()
         
         if self.container:
             try:
@@ -275,42 +203,60 @@ class RTSPStreamEngine(QObject):
     
     def _capture_frames(self):
         """
-        Internal method to capture and decode frames in a separate thread.
-        Converts frames to RGB24 NumPy arrays with zero-copy techniques.
-        Sends FPS updates via callbacks and signals, handles graceful interruption.
+        Capture frames from the stream in a separate thread.
+        Handles frame decoding, conversion, and callback execution.
+        Uses FrameBuffer with Latest Frame Policy and Watchdog monitoring.
+        
+        Thread-safe: Runs in daemon thread, uses signals for GUI updates.
+        Handles exceptions gracefully without crashing the thread.
         """
-        while self.is_running and self.container:
-            try:
-                for frame in self.container.decode(self.stream):
-                    if not self.is_running or self.interrupt_event.is_set():
-                        break
+        try:
+            if not self.container or not self.stream:
+                logger.log_error("DECODE_ERROR", "Container or stream is None")
+                self.error_occurred.emit("Stream error: Invalid container or stream")
+                return
+            
+            # Calculate target time between frames (e.g., 0.033s for 30 FPS)
+            frame_sleep = 1.0 / self.fps if self.fps > 0 else 0.03
+            
+            for frame in self.container.decode(self.stream):
+                if not self.is_running or self.interrupt_event.is_set():
+                    break
+                
+                try:
+                    start_time = time.time()
                     
-                    # Convert frame to RGB24 NumPy array (zero-copy)
+                    # Convert frame to RGB24 NumPy array
                     rgb_frame = frame.to_ndarray(format=Config.TARGET_PIXEL_FORMAT)
-                    
                     self.frame_count += 1
                     current_time = time.time()
                     
-                    # Emit frame ready signal to GUI
-                    self.frame_ready.emit(rgb_frame)
+                    # Put frame into buffer (Latest Frame Policy)
+                    self.frame_buffer.put_frame(rgb_frame)
                     
-                    # Call frame callbacks
+                    # Execute all registered frame callbacks (e.g., for AI processing or recording)
                     for callback in self.frame_callbacks:
                         try:
                             callback(rgb_frame)
                         except Exception as e:
                             logger.log_error("CALLBACK_ERROR", f"Error in frame callback: {e}")
                     
-                    # Calculate actual FPS every 30 frames and notify via callback and signal
+                    # [Optimization for Local Files] 
+                    # Pace the decoding to match original FPS to save CPU/GPU and ensure smooth motion.
+                    # Only active for local files; live streams remain real-time.
+                    if os.path.isfile(self.rtsp_url):
+                        processing_time = time.time() - start_time
+                        sleep_time = max(0, frame_sleep - processing_time)
+                        time.sleep(sleep_time)
+
+                    # Calculate and emit actual FPS every 30 frames
                     if self.frame_count % 30 == 0:
                         elapsed = current_time - self.last_frame_time
                         actual_fps = 30 / elapsed if elapsed > 0 else 0
-                        logger.log_ui_event(f"Actual FPS: {actual_fps:.2f}")
                         
-                        # Emit FPS signal to GUI
                         self.fps_updated.emit(actual_fps)
                         
-                        # Notify FPS callbacks (for non-GUI use)
+                        # Execute FPS callbacks
                         for callback in self.fps_callbacks:
                             try:
                                 callback(actual_fps)
@@ -318,71 +264,51 @@ class RTSPStreamEngine(QObject):
                                 logger.log_error("FPS_CALLBACK_ERROR", f"Error in FPS callback: {e}")
                         
                         self.last_frame_time = current_time
+                
+                except Exception as e:
+                    logger.log_error("FRAME_PROCESSING_ERROR", f"Error processing frame: {e}")
+                    # Continue processing next frame instead of crashing
+                    continue
                             
-            except Exception as e:
-                logger.log_error("DECODE_ERROR", f"Error decoding frame: {e}", "ERR_DECODE")
-                self.error_occurred.emit(f"Decode error: {str(e)}")
-                break
-        
-        logger.log_ui_event("Frame capture thread ended")
+        except Exception as e:
+            if self.is_running:
+                logger.log_error("DECODE_ERROR", f"Error during streaming: {e}", "ERR_DECODE")
+                self.error_occurred.emit(f"Stream error: {str(e)}")
+        finally:
+            logger.log_ui_event("Frame capture thread ended")
+            self.is_running = False
     
-    def get_frame(self, timeout: float = 1.0) -> Optional[np.ndarray]:
-        """
-        Get a frame from the stream (deprecated - use frame callbacks instead).
-        
-        Args:
-            timeout: Maximum time to wait for a frame
-            
-        Returns:
-            Frame as numpy array or None if no frame available
-        """
-        # This method is deprecated with PyAV - use callbacks instead
-        return None
+    def _on_frame_ready(self):
+        """Callback when frame is ready in buffer."""
+        frame = self.frame_buffer.get_frame()
+        if frame is not None:
+            self.frame_ready.emit(frame)
     
-    def get_latest_frame(self) -> Optional[np.ndarray]:
-        """
-        Get the most recent frame (deprecated - use frame callbacks instead).
-        
-        Returns:
-            Latest frame as numpy array or None if no frame available
-        """
-        # This method is deprecated with PyAV - use callbacks instead
-        return None
-    
+    def _on_frame_timeout(self):
+        """Callback when watchdog detects frame timeout."""
+        logger.log_timeout(Config.WATCHDOG_TIMEOUT)
+        if self.is_running:
+            # Trigger reconnection through error signal
+            self.error_occurred.emit(f"Stream timeout: No frames received for {Config.WATCHDOG_TIMEOUT}s")
+
     def is_connected(self) -> bool:
-        """
-        Check if the stream is connected and running.
-        
-        Returns:
-            True if stream is connected, False otherwise
-        """
-        return self.is_running and self.container is not None and self.stream is not None
+        return self.is_running and self.container is not None
     
     def get_stream_info(self) -> dict:
-        """
-        Get information about the current stream.
-        
-        Returns:
-            Dictionary containing stream information
-        """
         if not self.container or not self.stream:
             return {}
-            
         return {
             'url': self.rtsp_url,
             'codec': self.codec_name,
             'fps': self.fps,
             'width': self.width,
             'height': self.height,
-            'frame_count': self.frame_count,
             'is_connected': self.is_connected(),
         }
     
     def __enter__(self):
-        """Context manager entry."""
         self.start()
         return self
         
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
         self.stop()

@@ -38,9 +38,23 @@ class FrameBuffer:
         Zero-copy: stores reference to frame data.
         Atomic swap: minimal lock contention to prevent GUI starvation.
         
+        Thread-safe: Uses lock for atomic frame swap.
+        Callback executed outside lock to prevent blocking frame delivery.
+        
         Args:
             frame: NumPy array in RGB24 format from PyAV
+            
+        Raises:
+            ValueError: If frame is None or invalid
         """
+        if frame is None:
+            self.logger.log_error("FRAME_ERROR", "Attempted to put None frame")
+            return
+        
+        if not isinstance(frame, np.ndarray):
+            self.logger.log_error("FRAME_ERROR", f"Invalid frame type: {type(frame)}")
+            return
+        
         # Atomic swap: minimal lock duration
         with self.frame_lock:
             self.current_frame = frame
@@ -98,7 +112,12 @@ class FrameBuffer:
         Watchdog loop - monitors frame arrival with 2.5s timeout.
         Checks every 100ms for frame timeout.
         Triggers reconnection if no frames received.
+        
+        Thread-safe: Uses time.time() which is thread-safe.
+        Prevents repeated timeout triggers by resetting timer only once per timeout.
         """
+        timeout_triggered = False
+        
         while self.watchdog_running:
             time.sleep(Config.WATCHDOG_CHECK_INTERVAL)
             
@@ -106,20 +125,27 @@ class FrameBuffer:
             
             # Timeout threshold: 2.5 seconds
             if elapsed > Config.WATCHDOG_TIMEOUT:
-                self.logger.log_timeout(Config.WATCHDOG_TIMEOUT)
-                
-                if self.on_timeout:
-                    try:
-                        self.on_timeout()
-                    except Exception as e:
-                        self.logger.log_error("TIMEOUT_CALLBACK_ERROR", f"Timeout callback error: {e}")
-                
-                # Reset timer to avoid repeated timeout triggers
-                self.last_frame_time = time.time()
+                if not timeout_triggered:
+                    self.logger.log_timeout(Config.WATCHDOG_TIMEOUT)
+                    
+                    if self.on_timeout:
+                        try:
+                            self.on_timeout()
+                        except Exception as e:
+                            self.logger.log_error("TIMEOUT_CALLBACK_ERROR", f"Timeout callback error: {e}")
+                    
+                    timeout_triggered = True
+            else:
+                # Reset flag when frames resume
+                timeout_triggered = False
 
     def reset_frame_timer(self):
-        """Reset the frame timer (called when stream reconnects)."""
-        self.last_frame_time = time.time()
+        """
+        Reset the frame timer (called when stream reconnects).
+        Thread-safe: Uses lock to protect timer reset.
+        """
+        with self.frame_lock:
+            self.last_frame_time = time.time()
 
     def get_buffer_stats(self) -> dict:
         """Get buffer statistics."""

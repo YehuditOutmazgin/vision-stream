@@ -38,7 +38,7 @@ class URLValidator:
         # Check if empty
         if not url or not url.strip():
             return False, "URL cannot be empty"
-        return True, ""
+        
         url = url.strip()
 
         # Check if starts with rtsp://
