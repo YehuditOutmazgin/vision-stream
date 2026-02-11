@@ -91,6 +91,10 @@ class ReconnectionManager:
         Args:
             error: Error message
         """
+        # Check if we're already in error state (max retries exceeded)
+        if self.state == StreamState.ERROR:
+            return
+        
         self.attempt_count += 1
         
         if self.attempt_count >= Config.MAX_RECONNECTION_ATTEMPTS:
@@ -128,8 +132,9 @@ class ReconnectionManager:
             self.wait_event.clear()
             self.wait_event.wait(timeout=wait_time)
         
-        # Transition to connecting
-        self.set_state(StreamState.CONNECTING)
+        # Check again if we're in error state before transitioning
+        if self.state != StreamState.ERROR:
+            self.set_state(StreamState.CONNECTING)
 
     def stream_interrupted(self):
         """Handle stream interruption (watchdog timeout)."""

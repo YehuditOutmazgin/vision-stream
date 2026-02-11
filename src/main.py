@@ -3,7 +3,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QMessageBox, QFileDialog, QPushButton, QLabel
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QFileDialog, QPushButton, QLabel
 from PySide6.QtCore import Slot, Qt
 from PySide6.QtGui import QFont
 
@@ -14,6 +14,7 @@ from gui.styles import MAIN_STYLESHEET, COLORS
 from gui.components import VideoDisplay, ControlPanel, Header
 from gui.stream_controller import StreamController
 from gui.ui_manager import UIManager
+from gui.error_display import ErrorDialog
 
 
 class VisionStreamApp(QMainWindow):
@@ -28,15 +29,15 @@ class VisionStreamApp(QMainWindow):
     def _init_ui(self):
         """Initialize the user interface."""
         self.setWindowTitle(f"{Config.APP_NAME} v{Config.APP_VERSION}")
-        self.resize(900, 800)
+        self.setFixedSize(800, 650)  # Fixed window size - no resizing
         self.setStyleSheet(MAIN_STYLESHEET)
 
         # Central widget and main layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(16, 24, 16, 24)
-        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(12, 16, 12, 16)
+        main_layout.setSpacing(12)
 
         # Header
         self.header = Header()
@@ -55,19 +56,24 @@ class VisionStreamApp(QMainWindow):
         # Play button
         self.play_btn = QPushButton("▶ Play")
         self.play_btn.setObjectName("play_btn")
-        self.play_btn.setMinimumHeight(48)
-        self.play_btn.setFont(QFont("-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", 15, QFont.Bold))
+        self.play_btn.setMinimumHeight(40)
+        self.play_btn.setFont(QFont("-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", 13, QFont.Bold))
         self.play_btn.clicked.connect(self._on_play_stop_clicked)
         main_layout.addWidget(self.play_btn)
 
         # Video display
         self.video_display = VideoDisplay()
-        main_layout.addWidget(self.video_display, 1)
+        video_container = QWidget()
+        video_layout = QVBoxLayout(video_container)
+        video_layout.setContentsMargins(0, 0, 0, 0)
+        video_layout.addWidget(self.video_display)
+        video_layout.addStretch()
+        main_layout.addWidget(video_container, 0)
         
         # Status label
         self.status_label = QLabel("")
         self.status_label.setFont(QFont("-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", 11))
-        self.status_label.setStyleSheet(f"color: {COLORS['muted_foreground']}; padding: 4px;")
+        self.status_label.setStyleSheet(f"color: {COLORS['muted_foreground']}; padding: 2px;")
         self.status_label.hide()
         main_layout.addWidget(self.status_label)
 
@@ -79,6 +85,9 @@ class VisionStreamApp(QMainWindow):
             on_state_changed=self._on_stream_state_changed,
             on_reconnect_attempt=self._on_reconnect_attempt
         )
+        
+        # Setup max retries callback to show error dialog
+        self.stream_controller.reconnection_manager.on_max_retries_exceeded = self._on_max_retries_exceeded
         
         self.ui_manager = UIManager(
             play_btn=self.play_btn,
@@ -112,7 +121,8 @@ class VisionStreamApp(QMainWindow):
     @Slot()
     def _on_play_stop_clicked(self):
         """Handle play/stop button click."""
-        if self.stream_controller.engine and self.stream_controller.engine.is_running:
+        # Check if we're in connecting or playing state
+        if self.play_btn.text() == "⏹ Stop":
             self._stop_stream()
         else:
             self._start_stream()
@@ -124,11 +134,20 @@ class VisionStreamApp(QMainWindow):
         
         if not success:
             self._show_error(error_msg)
+        else:
+            # Update UI to connecting state FIRST
+            self.ui_manager.set_connecting()
+            # Then start the actual connection in background
+            self.stream_controller.start_connection()
 
     def _stop_stream(self):
         """Stop the current stream."""
-        self.stream_controller.stop()
-        self.ui_manager.set_stopped()
+        try:
+            self.stream_controller.stop()
+            self.ui_manager.set_stopped()
+        except RuntimeError:
+            # Thread already deleted
+            self.ui_manager.set_stopped()
 
     @Slot(float)
     def _on_fps_updated(self, fps):
@@ -138,33 +157,85 @@ class VisionStreamApp(QMainWindow):
     @Slot(str, str)
     def _on_stream_state_changed(self, state_value, error_msg):
         """Handle stream state changes."""
-        self.ui_manager.handle_state_change(state_value, error_msg)
+        try:
+            self.ui_manager.handle_state_change(state_value, error_msg)
+            # Show error dialog only after all retries failed (not on every attempt)
+        except Exception as e:
+            self.logger.log_error("UI_ERROR", f"Error in state change handler: {e}")
+            import traceback
+            traceback.print_exc()
 
     @Slot(int, int)
     def _on_reconnect_attempt(self, attempt, wait_time):
         """Handle reconnection attempt."""
         self.ui_manager.set_reconnecting(attempt, wait_time)
 
+    def _on_max_retries_exceeded(self):
+        """Handle max retries exceeded."""
+        try:
+            # Stop everything
+            self.stream_controller.stop()
+            
+            # Show error dialog
+            user_friendly_msg = "Failed to connect after 5 attempts.\n\nPlease check the URL and try again."
+            ErrorDialog.show_validation_error(self, user_friendly_msg)
+            
+            # Update UI
+            self.ui_manager.set_error("Connection failed")
+        except Exception as e:
+            self.logger.log_error("UI_ERROR", f"Error in max retries handler: {e}")
+            import traceback
+            traceback.print_exc()
+
     def _show_error(self, msg):
-        """Display error message."""
+        """Display error message with dialog."""
         self.stream_controller.stop()
-        user_friendly_msg = ErrorHandler.get_user_friendly_message(msg)
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Error")
-        msg_box.setText(user_friendly_msg)
-        msg_box.setIcon(QMessageBox.Critical)
-        msg_box.setStyleSheet(MAIN_STYLESHEET)
-        msg_box.exec()
-        self.ui_manager.set_stopped()
+        
+        # Map technical errors to friendly text
+        user_friendly_msg = ErrorHandler.get_user_friendly_message(msg or "")
+        
+        # Show error dialog
+        ErrorDialog.show_validation_error(self, user_friendly_msg)
+        
+        # Show error in UI
+        self.ui_manager.set_error(user_friendly_msg)
 
     def closeEvent(self, event):
         """Handle application close event."""
-        self._stop_stream()
-        event.accept()
+        try:
+            if self.stream_controller.connection_thread:
+                try:
+                    self.stream_controller.connection_thread.stop()
+                except RuntimeError:
+                    pass
+            self._stop_stream()
+            event.accept()
+        except Exception as e:
+            self.logger.log_error("CLOSE_ERROR", f"Error during close: {e}")
+            event.accept()
 
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = VisionStreamApp()
-    window.show()
-    sys.exit(app.exec())
+    import os
+    import sys
+    
+    # Suppress FFmpeg/PyAV error messages to console
+    if sys.platform == 'win32':
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetErrorMode(0x0001 | 0x0002)  # SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX
+    
+    # Redirect stderr to suppress av/ffmpeg warnings
+    import av
+    av.logging.set_level(av.logging.ERROR)
+    
+    try:
+        app = QApplication(sys.argv)
+        window = VisionStreamApp()
+        window.show()
+        sys.exit(app.exec())
+    except Exception as e:
+        print(f"CRITICAL ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        input("Press Enter to exit...")

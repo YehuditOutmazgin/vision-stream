@@ -139,6 +139,16 @@ class VisionStreamLogger:
         """Log UI event (debug level)."""
         self.logger.debug(f"UI: {event}")
 
+    def log_latency(self, avg_ms: float, window_size: int):
+        """
+        Log average latency over a sliding window.
+
+        Args:
+            avg_ms: Average latency in milliseconds
+            window_size: Number of recent frames used for the average
+        """
+        self.logger.info(f"LATENCY: avg={avg_ms:.2f}ms over last {window_size} frames")
+
 
 def get_logger() -> VisionStreamLogger:
     """

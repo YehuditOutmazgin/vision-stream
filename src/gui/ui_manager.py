@@ -22,6 +22,9 @@ class UIManager:
         self.control_panel.toggle_enabled(False)
         self.status_label.hide()
         self.status_label.setText("")  # Clear any previous status text
+        # Hide any transient overlays on the video
+        if hasattr(self.video_display, "hide_overlay"):
+            self.video_display.hide_overlay()
     
     def set_stopped(self):
         """Update UI for stopped state."""
@@ -33,21 +36,26 @@ class UIManager:
     
     def set_connecting(self):
         """Update UI for connecting state."""
+        self.play_btn.setText("⏹ Stop")
+        self.control_panel.toggle_enabled(False)
         self.status_label.setText("🔄 Connecting...")
         self.status_label.show()
+        if hasattr(self.video_display, "show_connecting"):
+            self.video_display.show_connecting(reconnecting=False)
     
     def set_reconnecting(self, attempt, wait_time):
         """Update UI for reconnecting state."""
         self.status_label.setText(f"⏳ Reconnecting... (Attempt {attempt}, waiting {wait_time}s)")
         self.status_label.show()
+        if hasattr(self.video_display, "show_connecting"):
+            self.video_display.show_connecting(reconnecting=True)
     
     def set_error(self, error_msg):
         """Update UI for error state."""
         self.play_btn.setText("▶ Play")
         self.control_panel.toggle_enabled(True)
-        self.status_label.setText("❌ Connection failed. Click Play to retry.")
+        self.status_label.setText(f"❌ {error_msg}. Click Play to retry.")
         self.status_label.show()
-        self.fps_display.hide()
         self.video_display.clear_display()
     
     def update_fps(self, fps):

@@ -30,11 +30,13 @@ class Config:
     
     # FFmpeg Configuration
     FFMPEG_OPTIONS = {
-        "rtsp_transport": "tcp",      # Force TCP for reliability (Req 6.9)
-        "fflags": "nobuffer",         # Disable internal buffering (Req 6.10)
-        "flags": "low_delay",         # Enable low-delay mode (Req 6.10)
+        "rtsp_transport": "tcp",      # Force TCP for reliability
+        "fflags": "nobuffer",         # Disable internal buffering
+        "flags": "low_delay",         # Enable low-delay mode
         "strict": "experimental",     # Allow experimental codecs
         "allowed_media_types": "video",  # Ignore audio for performance
+        "probesize": "32",            # Minimal probe size for faster detection
+        "analyzeduration": "0",       # No analysis duration
     }
     
     # Video Configuration

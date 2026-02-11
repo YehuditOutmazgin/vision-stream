@@ -1,5 +1,6 @@
 """
-Video Widget - Displays video frames with FPS counter and aspect ratio preservation.
+Legacy Video Widget - preserved for reference only.
+Moved from src/gui/video_widget.py after unifying UI around VisionStreamApp.
 """
 
 from PySide6.QtWidgets import QLabel
@@ -9,21 +10,21 @@ import numpy as np
 
 
 class VideoWidget(QLabel):
-    """Custom widget for video frame rendering."""
+    """Legacy custom widget for video frame rendering (not used by VisionStreamApp)."""
 
     def __init__(self):
         super().__init__()
         self.setAlignment(Qt.AlignCenter)
         self.setStyleSheet("background-color: black;")
         self.setMinimumSize(640, 480)
-        
+
         # FPS tracking
         self.frame_count = 0
         self.fps = 0
         self.fps_timer = QTimer()
         self.fps_timer.timeout.connect(self.update_fps)
         self.fps_timer.start(1000)  # Update every second
-        
+
         # Connection state
         self.is_connecting = False
         self.connecting_spinner_frame = 0
@@ -35,7 +36,7 @@ class VideoWidget(QLabel):
         """
         Display a frame from NumPy array with optimized scaling and aspect ratio.
         Uses FastTransformation for performance during playback.
-        
+
         Args:
             frame_array: NumPy array in RGB24 format
         """
@@ -43,7 +44,7 @@ class VideoWidget(QLabel):
             return
 
         height, width = frame_array.shape[:2]
-        
+
         # Convert NumPy array to QImage (zero-copy reference to frame data)
         bytes_per_line = 3 * width
         q_image = QImage(
@@ -62,15 +63,15 @@ class VideoWidget(QLabel):
             Qt.KeepAspectRatio,
             Qt.FastTransformation  # Fast scaling for real-time performance
         )
-        
+
         # Create final pixmap with letterboxing (black bars)
         final_pixmap = QPixmap(self.width(), self.height())
         final_pixmap.fill(QColor("black"))
-        
+
         # Center the scaled pixmap
         x = (self.width() - scaled_pixmap.width()) // 2
         y = (self.height() - scaled_pixmap.height()) // 2
-        
+
         # Draw frame and FPS counter with proper painter lifecycle management
         painter = QPainter(final_pixmap)
         try:
@@ -80,18 +81,18 @@ class VideoWidget(QLabel):
         finally:
             # Ensure painter is properly ended before NumPy buffer lifecycle changes
             painter.end()
-        
+
         self.setPixmap(final_pixmap)
         self.frame_count += 1
 
     def draw_fps(self, painter: QPainter):
         """
         Draw FPS counter in top-right corner with semi-transparent background.
-        
+
         Note: This method receives an active QPainter. The caller is responsible
         for calling painter.end() after this method returns to ensure proper
         lifecycle management and prevent crashes with NumPy buffer references.
-        
+
         Args:
             painter: Active QPainter object (caller must call end() after)
         """
@@ -100,21 +101,21 @@ class VideoWidget(QLabel):
         font = QFont("Arial", 12)
         font.setBold(True)
         painter.setFont(font)
-        
+
         # Calculate text dimensions
         metrics = painter.fontMetrics()
         text_width = metrics.horizontalAdvance(fps_text)
         text_height = metrics.height()
-        
+
         # Position in top-right corner with padding
         padding = 10
         x = self.width() - text_width - padding * 2
         y = padding
-        
+
         # Draw semi-transparent background
         bg_color = QColor(0, 0, 0, 150)  # Semi-transparent black
         painter.fillRect(x - padding, y - padding, text_width + padding * 2, text_height + padding, bg_color)
-        
+
         # Draw text
         painter.setPen(QColor("white"))
         painter.drawText(x, y + text_height - 3, fps_text)
@@ -134,7 +135,7 @@ class VideoWidget(QLabel):
     def set_connecting(self, is_connecting: bool):
         """
         Set connecting state and show/hide spinner.
-        
+
         Args:
             is_connecting: True to show connecting indicator, False to hide
         """
@@ -154,25 +155,25 @@ class VideoWidget(QLabel):
         # Create overlay pixmap
         overlay = QPixmap(self.width(), self.height())
         overlay.fill(QColor(0, 0, 0, 200))  # Semi-transparent black
-        
+
         painter = QPainter(overlay)
-        
+
         # Draw spinner animation
         spinner_chars = ['⠋', '⠙', '⠹', '⠸']
         spinner_text = spinner_chars[self.connecting_spinner_frame]
-        
+
         font = QFont("Arial", 48)
         font.setBold(True)
         painter.setFont(font)
         painter.setPen(QColor("white"))
-        
+
         # Draw spinner in center
         painter.drawText(
             0, 0, self.width(), self.height() // 2,
             Qt.AlignCenter | Qt.AlignBottom,
             spinner_text
         )
-        
+
         # Draw "Connecting..." text
         font.setPointSize(14)
         painter.setFont(font)
@@ -181,6 +182,7 @@ class VideoWidget(QLabel):
             Qt.AlignCenter | Qt.AlignTop,
             "Connecting..."
         )
-        
+
         painter.end()
         self.setPixmap(overlay)
+

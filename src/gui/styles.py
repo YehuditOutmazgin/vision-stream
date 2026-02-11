@@ -1,18 +1,25 @@
 """
-Tailwind-inspired styling for VisionStream application.
+Modern, clean styling for VisionStream application.
+Light theme with bright colors and professional design.
 """
 
-# Color palette
+# Color palette - Modern Light Theme
 COLORS = {
-    "background": "#f8fafc",
-    "foreground": "#0f172a",
+    "background": "#f5f7fa",
+    "foreground": "#1a1f36",
     "card": "#ffffff",
-    "muted_foreground": "#64748b",
-    "border": "#e2e8f0",
+    "muted_foreground": "#6b7280",
+    "border": "#e5e7eb",
     "input": "#ffffff",
-    "primary": "#3b82f6",
+    "primary": "#6366f1",
+    "primary_hover": "#4f46e5",
+    "primary_active": "#4338ca",
     "primary_foreground": "#ffffff",
-    "muted": "#f1f5f9",
+    "muted": "#f3f4f6",
+    "success": "#10b981",
+    "warning": "#f59e0b",
+    "error": "#ef4444",
+    "secondary": "#8b5cf6",
 }
 
 # Main stylesheet
@@ -29,14 +36,16 @@ QWidget {{
 QLineEdit {{
     background-color: {COLORS['card']};
     border: 1px solid {COLORS['border']};
-    border-radius: 6px;
+    border-radius: 8px;
     color: {COLORS['foreground']};
-    padding: 8px 12px;
-    font-size: 14px;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }}
 
 QLineEdit:focus {{
     border: 2px solid {COLORS['primary']};
+    background-color: #fafbff;
 }}
 
 QLineEdit::placeholder {{
@@ -47,18 +56,20 @@ QPushButton {{
     background-color: {COLORS['card']};
     color: {COLORS['foreground']};
     border: 1px solid {COLORS['border']};
-    border-radius: 6px;
-    padding: 8px 16px;
-    font-weight: bold;
-    font-size: 14px;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-weight: 600;
+    font-size: 13px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }}
 
 QPushButton:hover {{
     background-color: {COLORS['muted']};
+    border: 1px solid #d1d5db;
 }}
 
 QPushButton:pressed {{
-    background-color: {COLORS['border']};
+    background-color: #e5e7eb;
 }}
 
 QPushButton:disabled {{
@@ -70,14 +81,17 @@ QPushButton#play_btn {{
     background-color: {COLORS['primary']};
     color: {COLORS['primary_foreground']};
     border: none;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 12px 24px;
 }}
 
 QPushButton#play_btn:hover {{
-    background-color: #2563eb;
+    background-color: {COLORS['primary_hover']};
 }}
 
 QPushButton#play_btn:pressed {{
-    background-color: #1d4ed8;
+    background-color: {COLORS['primary_active']};
 }}
 
 QLabel {{
@@ -85,28 +99,29 @@ QLabel {{
 }}
 
 QLabel#title {{
-    font-size: 36px;
-    font-weight: bold;
+    font-size: 28px;
+    font-weight: 700;
     color: {COLORS['foreground']};
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }}
 
 QLabel#description {{
     color: {COLORS['muted_foreground']};
-    font-size: 15px;
+    font-size: 13px;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    line-height: 1.6;
+    line-height: 1.5;
 }}
 
 QLabel#status {{
     color: {COLORS['muted_foreground']};
     font-size: 12px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }}
 
 QFrame {{
     background-color: {COLORS['card']};
     border: 1px solid {COLORS['border']};
-    border-radius: 8px;
+    border-radius: 10px;
 }}
 
 QMessageBox {{
@@ -132,8 +147,8 @@ QMessageBox QPushButton {{
     background-color: {COLORS['card']};
     color: {COLORS['foreground']};
     border: 1px solid {COLORS['border']};
-    border-radius: 6px;
-    padding: 6px 16px;
+    border-radius: 8px;
+    padding: 8px 18px;
 }}
 
 QMessageBox QPushButton:hover {{

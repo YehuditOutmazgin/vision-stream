@@ -1,8 +1,8 @@
-# Requirements Document: RTSP Desktop Player
+# Requirements Document: Vision Stream Pro RTSP Desktop Player
 
 ## Introduction
 
-VisionStream RTSP Viewer - A high-performance, native desktop video player for Windows built with Python 3.11, PySide6, and PyAV (FFmpeg backend). The application is designed for professional use with ultra-low latency streaming, supporting H.264/H.265 codecs over RTSP protocol. The architecture emphasizes thread-safe operations, zero-copy frame handling, NumPy integration, and responsive UI even under network stress conditions.
+Vision Stream Pro - A high-performance, native desktop video player for Windows built with Python 3.11, PySide6, and PyAV (FFmpeg backend). The application is designed for professional use with ultra-low latency streaming, supporting H.264/H.265 codecs over RTSP protocol as well as local video files and webcam sources. The architecture emphasizes thread-safe operations, zero-copy frame handling, NumPy integration, and responsive UI even under network stress conditions.
 
 **Technology Stack:**
 - **GUI Framework:** PySide6 (Qt 6 for Python)
@@ -12,9 +12,9 @@ VisionStream RTSP Viewer - A high-performance, native desktop video player for W
 - **Target Platform:** Windows (cross-platform capable)
 
 **Development Strategy:**
-- **Phase 1 (MVP):** Single-stream RTSP player with all core features (Requirements 1-9, 11)
+- **Phase 1 (MVP):** Single-stream player (RTSP, Local Files, Webcam) with all core features (Requirements 1-9, 11)
 - **Phase 2 (Future):** Multi-stream grid support (Requirement 10) - architecture designed to support this from the start
-- **Architecture Principle:** All components (VideoEngine, VideoWidget, StreamManager) are designed as reusable, independent modules to enable future grid expansion with minimal refactoring
+- **Architecture Principle:** All components (`RTSPStreamEngine`, `FrameBuffer`, `StreamController`, `VisionStreamApp`, `VideoDisplay`) are designed as reusable, independent modules to enable future grid expansion with minimal refactoring
 
 ## Glossary
 
@@ -35,17 +35,19 @@ VisionStream RTSP Viewer - A high-performance, native desktop video player for W
 
 ## Requirements
 
-### Requirement 1: RTSP URL Input
+### Requirement 1: Input Sources (RTSP, Local Files, Webcam)
 
-**User Story:** As a user, I want to enter an RTSP stream URL into the application, so that I can specify which video stream to play.
+**User Story:** As a user, I want to select a video source (RTSP URL, local file, or webcam) so that I can monitor different types of streams from a single application.
 
 #### Acceptance Criteria
 
-1. WHEN the application starts, THE Player SHALL display a text input field for entering RTSP URLs
-2. WHEN a user types an RTSP URL into the input field, THE Player SHALL accept and store the URL
-3. WHEN a user attempts to enter an empty URL, THE Player SHALL prevent submission and maintain the current state
-4. WHEN a user enters a malformed URL, THE Player SHALL validate the format using regex pattern: `rtsp://[host]:[port]/[path]` and provide feedback
-5. WHEN a user enters a valid URL format, THE Player SHALL accept it and enable the Play button
+1. WHEN the application starts, THE Player SHALL display a text input field for entering RTSP URLs or file paths, and buttons to select local files or webcam.
+2. WHEN a user types an RTSP URL into the input field, THE Player SHALL accept and store the URL.
+3. WHEN a user attempts to enter an empty URL, THE Player SHALL prevent submission and maintain the current state.
+4. WHEN a user enters a malformed RTSP URL, THE Player SHALL validate the format using `URLValidator` (single source of truth) and provide feedback.
+5. WHEN a user enters a valid RTSP URL format, THE Player SHALL accept it and enable the Play button.
+6. WHEN a user selects a local file, THE Player SHALL populate the input field with the file path and treat it as a valid source without additional URL validation.
+7. WHEN a user selects a webcam (e.g., `video=Integrated Camera`), THE Player SHALL populate the input field accordingly and treat it as a valid source without additional URL validation.
 
 ### Requirement 2: Playback Control
 
@@ -162,19 +164,21 @@ VisionStream RTSP Viewer - A high-performance, native desktop video player for W
 5. WHEN the application runs, THE Player SHALL write all logs to a file in the application directory for post-analysis
 6. WHEN errors occur, THE Player SHALL include error codes and descriptions in both UI and logs
 
-### Requirement 10: Multi-Stream Grid Display (Future-Ready Architecture)
+### Requirement 10: Multi-Stream Grid Display (Future Phase)
 
 **User Story:** As a professional user, I want the application to be designed for future multi-stream capability, so that I can monitor multiple cameras simultaneously in a future version.
 
-#### Acceptance Criteria
+> **Phase:** Future (not implemented in current UI).  
+> The current implementation displays a single stream, but the architecture (`RTSPStreamEngine`, `FrameBuffer`, `StreamController`, and UI composition) is designed to allow multiple independent instances to be composed into a grid layout in a later phase.
 
-1. WHEN the application is designed, THE Player architecture SHALL support multiple independent VideoEngine instances
-2. WHEN VideoWidget is implemented, THE Player SHALL design it as a reusable, self-contained component
-3. WHEN the application runs, THE Player SHALL use a thread pool or separate daemon threads for each stream instance
-4. WHEN multiple streams are added (future feature), THE Player SHALL support configurable grid layouts (1x1, 2x2, 3x3, 4x4)
-5. WHEN the window is resized, THE Player SHALL scale all grid cells proportionally while maintaining aspect ratios
-6. WHEN a stream fails in a grid, THE Player SHALL display an error in that cell without affecting other streams
-7. THE Player architecture SHALL be designed to minimize CPU and memory overhead when multiple streams are active
+#### Acceptance Criteria (Future)
+
+1. WHEN the application is extended to a grid layout, THE Player architecture SHALL support multiple independent `RTSPStreamEngine` instances.
+2. WHEN grid support is implemented, THE Player SHALL use a thread pool or separate daemon threads for each stream instance.
+3. WHEN multiple streams are added, THE Player SHALL support configurable grid layouts (1x1, 2x2, 3x3, 4x4).
+4. WHEN the window is resized, THE Player SHALL scale all grid cells proportionally while maintaining aspect ratios.
+5. WHEN a stream fails in a grid, THE Player SHALL display an error in that cell without affecting other streams.
+6. THE Player architecture SHALL be designed to minimize CPU and memory overhead when multiple streams are active.
 
 ### Requirement 11: Deployment and Distribution
 
@@ -193,7 +197,7 @@ VisionStream RTSP Viewer - A high-performance, native desktop video player for W
 ### Data Flow - Sequence Diagram
 
 ```
-User                Main Window         Stream Engine           RTSP Server         Frame Buffer        Video Widget
+User                VisionStreamApp     StreamController/Engine  RTSP Server         Frame Buffer        VideoDisplay
  |                      |                    |                      |                    |                   |
  |--Enter URL---------->|                    |                      |                    |                   |
  |                      |                    |                      |                    |                   |
@@ -232,38 +236,43 @@ User                Main Window         Stream Engine           RTSP Server     
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     VisionStream RTSP Viewer                    │
+│                     Vision Stream Pro                           │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │              GUI Layer (PySide6 / Qt)                    │   │
 │  ├──────────────────────────────────────────────────────────┤   │
-│  │  Main Window                                             │   │
-│  │  ├─ URL Input Field                                      │   │
-│  │  ├─ Play/Stop Buttons                                    │   │
-│  │  ├─ Video Widget (QLabel with QImage rendering)          │   │
-│  │  └─ Status/Error Display                                 │   │
+│  │  VisionStreamApp (Main Window)                          │   │
+│  │  ├─ Header (branding & description)                     │   │
+│  │  ├─ ControlPanel (URL/File/Webcam, FPS label)           │   │
+│  │  ├─ Play/Stop Button                                    │   │
+│  │  ├─ VideoDisplay (letterboxed video, overlays)          │   │
+│  │  └─ Status/Error Label                                  │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                           ▲                                     │
 │                           │ Qt Signals                          │
 │                           │ (Thread-Safe)                       │
 │  ┌────────────────────────┴─────────────────────────────────┐   │
-│  │              Stream Engine (Daemon Thread)               │   │
+│  │              Stream Layer                                │   │
 │  ├──────────────────────────────────────────────────────────┤   │
-│  │  RTSP Connection Manager                                 │   │
-│  │  ├─ URL Validation                                       │   │
-│  │  ├─ Connection Handling                                  │   │
-│  │  └─ Error Management                                     │   │
+│  │  StreamController                                       │   │
+│  │  ├─ Uses URLValidator for RTSP URL validation           │   │
+│  │  ├─ Manages RTSP/local/webcam sources                   │   │
+│  │  ├─ Coordinates ReconnectionManager                     │   │
+│  │  └─ Bridges RTSPStreamEngine ↔ UIManager                │   │
 │  │                                                          │   │
-│  │  PyAV Decoder (FFmpeg Backend)                           │   │
-│  │  ├─ H.264/H.265 Decoding                                 │   │
-│  │  ├─ RGB24 Conversion                                     │   │
-│  │  └─ NumPy Array Generation                               │   │
+│  │  RTSPStreamEngine (Daemon Thread)                       │   │
+│  │  ├─ RTSP/File/Webcam Connection Handling                │   │
+│  │  ├─ PyAV Decoder (FFmpeg Backend)                       │   │
+│  │  ├─ H.264/H.265 Decoding                                │   │
+│  │  ├─ RGB24 Conversion (NumPy)                            │   │
+│  │  ├─ FPSCounter (real-time FPS)                          │   │
+│  │  └─ LatencyTracker (frame latency metrics)              │   │
 │  │                                                          │   │
-│  │  Frame Buffer Manager                                    │   │
-│  │  ├─ Single-Frame Buffer (Strict Latest Frame Policy)     │   │
-│  │  ├─ Zero-Copy Frame Handling                             │   │
-│  │  └─ Watchdog Monitor (2.5s Timeout)                      │   │
+│  │  FrameBuffer Manager                                    │   │
+│  │  ├─ Single-Frame Buffer (Strict Latest Frame Policy)    │   │
+│  │  ├─ Zero-Copy Frame Handling                            │   │
+│  │  └─ Watchdog Monitor (2.5s Timeout)                     │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                           ▲                                     │
 │                           │ RTSP Protocol                       │

@@ -26,7 +26,7 @@ ffmpeg -version          # Should show FFmpeg version
 ```bash
 # Double-click build.bat
 # OR run from command prompt:
-build.bat
+build.bat  # or .\build.bat in PowerShell
 ```
 
 ### Option 2: Manual Build
@@ -36,7 +36,7 @@ pip install -r src/requirements.txt
 pip install pyinstaller
 
 # Build the executable
-pyinstaller pyinstaller_spec.spec --distpath dist --buildpath build --specpath .
+pyinstaller pyinstaller_spec.spec --distpath dist --workpath build
 ```
 
 ### Output
@@ -59,7 +59,7 @@ pip3 install -r src/requirements.txt
 pip3 install pyinstaller
 
 # Build the application
-pyinstaller pyinstaller_spec.spec --distpath dist --buildpath build --specpath .
+pyinstaller pyinstaller_spec.spec --distpath dist --workpath build
 ```
 
 ### Output
@@ -81,7 +81,7 @@ pip3 install -r src/requirements.txt
 pip3 install pyinstaller
 
 # Build the executable
-pyinstaller pyinstaller_spec.spec --distpath dist --buildpath build --specpath .
+pyinstaller pyinstaller_spec.spec --distpath dist --workpath build
 ```
 
 ### Output

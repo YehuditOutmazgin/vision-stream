@@ -42,8 +42,8 @@ VisionStream is a robust, cross-platform desktop application designed for real-t
 See **[QUICK_BUILD.md](QUICK_BUILD.md)** for the fastest way to build:
 
 ```bash
-# Windows
-build.bat
+# Windows (PowerShell)
+.\build.bat
 
 # macOS / Linux
 chmod +x build.sh
@@ -94,9 +94,7 @@ VisionStream/
 │   │   ├── frame_buffer.py      # Latest Frame Policy buffer
 │   │   ├── reconnection_manager.py  # Auto-reconnection logic
 │   │   └── __init__.py
-│   ├── gui/                     # User interface components
-│   │   ├── main_window.py       # Main window and layout
-│   │   ├── video_widget.py      # Video rendering widget
+│   ├── gui/                     # User interface components (current)
 │   │   ├── components.py        # Shared UI components (Header, ControlPanel, VideoDisplay)
 │   │   ├── stream_controller.py # Stream operations controller
 │   │   ├── ui_manager.py        # UI state management
@@ -113,10 +111,12 @@ VisionStream/
 │   │   └── __init__.py
 │   ├── requirements.txt         # Python dependencies
 │   └── __init__.py
+├── legacy/                      # Legacy UI components (kept for reference)
+│   ├── main_window.py           # Original main window implementation (unused)
+│   └── video_widget.py          # Original video widget with FPS/overlay (unused)
 ├── build.bat                    # Windows build script
 ├── build.sh                     # macOS/Linux build script
-├── main.spec                    # PyInstaller spec for main entry
-├── pyinstaller_spec.spec        # Additional PyInstaller configuration
+├── pyinstaller_spec.spec        # PyInstaller spec used by build scripts
 ├── specification.md             # Full requirements document
 ├── QUICK_BUILD.md               # Quick build guide (3 steps)
 ├── BUILD_INSTRUCTIONS.md        # Detailed build instructions
@@ -170,7 +170,7 @@ See [specification.md](specification.md) for complete details.
 
 ## 🚀 Getting Started
 
-### For Users
+### For Users (Reviewers / Stakeholders)
 1. Download the latest executable from releases
 2. Run `VisionStream.exe` (Windows) or `VisionStream.app` (macOS)
 3. Enter an RTSP URL and click Play

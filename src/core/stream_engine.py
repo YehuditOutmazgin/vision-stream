@@ -12,6 +12,7 @@ import numpy as np
 from PySide6.QtCore import QObject, Signal
 from utils.logger import get_logger
 from utils.config import Config
+from utils.metrics import FPSCounter, LatencyTracker
 from core.frame_buffer import FrameBuffer
 
 logger = get_logger()
@@ -38,8 +39,6 @@ class RTSPStreamEngine(QObject):
         self.frame_callbacks = []
         self.fps_callbacks = []
         self.fps = 30
-        self.frame_count = 0
-        self.last_frame_time = time.time()
         self.codec_name = None
         self.width = None
         self.height = None
@@ -50,6 +49,11 @@ class RTSPStreamEngine(QObject):
         self.frame_buffer = FrameBuffer()
         self.frame_buffer.on_frame_ready = self._on_frame_ready
         self.frame_buffer.on_timeout = self._on_frame_timeout
+
+        # Metrics
+        self.fps_counter = FPSCounter()
+        self.latency_tracker = LatencyTracker()
+        self._last_latency_log_time = time.time()
         
     def add_frame_callback(self, callback: Callable[[np.ndarray], Any]):
         self.frame_callbacks.append(callback)
@@ -96,17 +100,38 @@ class RTSPStreamEngine(QObject):
                     logger.log_ui_event(f"Attempting to open local file: {self.rtsp_url}")
                     self.container = av.open(self.rtsp_url)
                 else:
-                    options.update({
-                        'rtsp_transport': 'tcp',
-                        'stimeout': '5000000',
-                        'allowed_media_types': 'video',
-                        'buffer_size': '2048000',
-                    })
-                    self.container = av.open(
-                        self.rtsp_url,
-                        options=options,
-                        timeout=self.connection_timeout
-                    )
+                    # RTSP stream - try UDP first, fallback to TCP
+                    logger.log_ui_event(f"Attempting to open RTSP stream: {self.rtsp_url}")
+                    
+                    # Check if interrupted before opening
+                    if self.interrupt_event.is_set():
+                        return False
+                    
+                    # Try UDP first (faster)
+                    try:
+                        options = {
+                            'rtsp_transport': 'udp',
+                            'stimeout': '3000000',
+                        }
+                        self.container = av.open(
+                            self.rtsp_url,
+                            options=options,
+                            timeout=(3, 3)
+                        )
+                    except:
+                        # Fallback to TCP
+                        if self.interrupt_event.is_set():
+                            return False
+                        options = {
+                            'rtsp_transport': 'tcp',
+                            'rtsp_flags': 'prefer_tcp',
+                            'stimeout': '3000000',
+                        }
+                        self.container = av.open(
+                            self.rtsp_url,
+                            options=options,
+                            timeout=(3, 3)
+                        )
             except Exception as e:
                 # Ensure container is closed if opening failed
                 if self.container:
@@ -150,8 +175,8 @@ class RTSPStreamEngine(QObject):
             
             self.is_running = True
             self.interrupt_event.clear()
-            self.frame_count = 0
-            self.last_frame_time = time.time()
+            self.fps_counter.reset()
+            self.latency_tracker.reset()
             
             # Start watchdog monitoring
             self.frame_buffer.start_watchdog()
@@ -189,6 +214,10 @@ class RTSPStreamEngine(QObject):
         # Clear callbacks to prevent memory leaks
         self.frame_callbacks.clear()
         self.fps_callbacks.clear()
+
+        # Reset metrics
+        self.fps_counter.reset()
+        self.latency_tracker.reset()
         
         if self.container:
             try:
@@ -228,8 +257,6 @@ class RTSPStreamEngine(QObject):
                     
                     # Convert frame to RGB24 NumPy array
                     rgb_frame = frame.to_ndarray(format=Config.TARGET_PIXEL_FORMAT)
-                    self.frame_count += 1
-                    current_time = time.time()
                     
                     # Put frame into buffer (Latest Frame Policy)
                     self.frame_buffer.put_frame(rgb_frame)
@@ -249,21 +276,29 @@ class RTSPStreamEngine(QObject):
                         sleep_time = max(0, frame_sleep - processing_time)
                         time.sleep(sleep_time)
 
-                    # Calculate and emit actual FPS every 30 frames
-                    if self.frame_count % 30 == 0:
-                        elapsed = current_time - self.last_frame_time
-                        actual_fps = 30 / elapsed if elapsed > 0 else 0
-                        
-                        self.fps_updated.emit(actual_fps)
-                        
-                        # Execute FPS callbacks
+                    # --- Metrics: FPS & Latency ---
+                    # Update FPS using FPSCounter (once per frame)
+                    current_fps = self.fps_counter.update()
+                    if current_fps > 0:
+                        self.fps = current_fps
+                        self.fps_updated.emit(current_fps)
                         for callback in self.fps_callbacks:
                             try:
-                                callback(actual_fps)
+                                callback(current_fps)
                             except Exception as e:
                                 logger.log_error("FPS_CALLBACK_ERROR", f"Error in FPS callback: {e}")
-                        
-                        self.last_frame_time = current_time
+
+                    # Record latency (decode + buffer enqueue) in milliseconds
+                    latency_ms = (time.time() - start_time) * 1000.0
+                    self.latency_tracker.record(latency_ms)
+
+                    # Log average latency periodically (every 60 seconds)
+                    now = time.time()
+                    if now - self._last_latency_log_time >= 60.0:
+                        avg_latency = self.latency_tracker.get_average()
+                        if avg_latency > 0:
+                            logger.log_latency(avg_latency, self.latency_tracker.window_size)
+                        self._last_latency_log_time = now
                 
                 except Exception as e:
                     logger.log_error("FRAME_PROCESSING_ERROR", f"Error processing frame: {e}")

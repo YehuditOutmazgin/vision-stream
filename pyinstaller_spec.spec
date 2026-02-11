@@ -7,10 +7,10 @@ block_cipher = None
 
 a = Analysis(
     ['src/main.py'],
-    pathex=[],
+    pathex=['src'],
     binaries=[],
     datas=[],
-    hiddenimports=['av', 'numpy', 'PySide6'],
+    hiddenimports=['av', 'numpy', 'PySide6', 'core', 'utils', 'gui'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -23,7 +23,7 @@ echo ""
 echo "Building VisionStream..."
 echo ""
 
-pyinstaller pyinstaller_spec.spec --distpath dist --buildpath build --specpath .
+pyinstaller pyinstaller_spec.spec --distpath dist --workpath build
 
 if [ $? -ne 0 ]; then
     echo ""

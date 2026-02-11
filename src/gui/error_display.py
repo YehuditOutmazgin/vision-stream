@@ -89,8 +89,8 @@ class ErrorDialog(QDialog):
 
     @staticmethod
     def show_max_retries_error(parent):
-        """Show max retries exceeded error dialog (blocking)."""
+        """Show max retries exceeded error dialog (non-blocking)."""
         message = "Maximum reconnection attempts exceeded.\n\nPlease check the RTSP URL and try again."
         dialog = ErrorDialog(parent, "Connection Error", message, "ERR_MAX_RETRIES")
-        dialog.setModal(True)  # Blocking - requires user action
-        dialog.exec()
+        dialog.setModal(False)  # Non-blocking
+        dialog.show()

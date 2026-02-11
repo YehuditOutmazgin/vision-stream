@@ -1,30 +1,28 @@
 """
-Main Window - Primary UI component for VisionStream.
+Legacy Main Window - preserved for reference only.
+Moved from src/gui/main_window.py after unifying UI around VisionStreamApp.
 """
 
-import re
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QLabel
 )
 from PySide6.QtCore import Qt, Signal
-from .video_widget import VideoWidget
-from .error_display import ErrorDialog
+
+from src.gui.video_widget import VideoWidget
+from src.gui.error_display import ErrorDialog
 
 
 class MainWindow(QMainWindow):
-    """Main application window."""
+    """Legacy main application window (not used by VisionStreamApp)."""
 
-    # RTSP URL validation regex pattern
-    RTSP_URL_PATTERN = re.compile(r'^rtsp://[a-zA-Z0-9\-._~:/?#\[\]@!$&\'()*+,;=]+$')
-    
     # Signals for stream control
     play_requested = Signal(str)  # Emitted when Play button clicked with URL
     stop_requested = Signal()     # Emitted when Stop button clicked
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VisionStream RTSP Viewer")
+        self.setWindowTitle("VisionStream RTSP Viewer (Legacy)")
         self.setGeometry(100, 100, 1280, 720)
         self.init_ui()
 
@@ -48,7 +46,7 @@ class MainWindow(QMainWindow):
         self.play_button = QPushButton("Play")
         self.stop_button = QPushButton("Stop")
         self.stop_button.setEnabled(False)
-        
+
         # Connect button signals
         self.play_button.clicked.connect(self._on_play_clicked)
         self.stop_button.clicked.connect(self._on_stop_clicked)
@@ -71,43 +69,10 @@ class MainWindow(QMainWindow):
 
         central_widget.setLayout(main_layout)
 
-    def validate_url(self, url: str) -> bool:
-        """
-        Validate RTSP URL format.
-        
-        Args:
-            url: URL string to validate
-            
-        Returns:
-            True if URL is valid, False otherwise
-        """
-        if not url or not url.strip():
-            ErrorDialog.show_validation_error(
-                self,
-                "URL cannot be empty"
-            )
-            return False
-        
-        if not self.RTSP_URL_PATTERN.match(url):
-            ErrorDialog.show_validation_error(
-                self,
-                "Invalid URL format.\n\nExpected format: rtsp://host:port/path"
-            )
-            return False
-        
-        return True
-
     def closeEvent(self, event):
-        """
-        Handle application close event with graceful shutdown.
-        
-        Args:
-            event: Close event
-        """
-        # Stop any active stream
+        """Handle application close event with graceful shutdown."""
         if self.stop_button.isEnabled():
             self.stop_requested.emit()
-        
         event.accept()
 
     def set_playing(self):
@@ -136,12 +101,7 @@ class MainWindow(QMainWindow):
         self.video_widget.set_connecting(True)
 
     def set_error(self, error_message: str):
-        """
-        Update UI state to error.
-        
-        Args:
-            error_message: Error message to display
-        """
+        """Update UI state to error."""
         self.play_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.url_input.setReadOnly(False)
@@ -149,11 +109,14 @@ class MainWindow(QMainWindow):
         self.video_widget.set_connecting(False)
 
     def _on_play_clicked(self):
-        """Handle Play button click with URL validation."""
+        """Handle Play button click."""
         url = self.url_input.text().strip()
-        if self.validate_url(url):
-            self.play_requested.emit(url)
+        if not url:
+            ErrorDialog.show_validation_error(self, "URL cannot be empty")
+            return
+        self.play_requested.emit(url)
 
     def _on_stop_clicked(self):
         """Handle Stop button click."""
         self.stop_requested.emit()
+
