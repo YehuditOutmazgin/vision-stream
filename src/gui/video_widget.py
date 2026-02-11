@@ -24,6 +24,9 @@ class VideoWidget(QLabel):
         self.fps_timer.timeout.connect(self.update_fps)
         self.fps_timer.start(1000)  # Update every second
         
+        # Stream info (resolution, codec)
+        self.stream_info = {}
+        
         # Connection state
         self.is_connecting = False
         self.connecting_spinner_frame = 0
@@ -86,7 +89,7 @@ class VideoWidget(QLabel):
 
     def draw_fps(self, painter: QPainter):
         """
-        Draw FPS counter in top-right corner with semi-transparent background.
+        Draw FPS counter and stream info in top-right corner with semi-transparent background.
         
         Note: This method receives an active QPainter. The caller is responsible
         for calling painter.end() after this method returns to ensure proper
@@ -95,29 +98,37 @@ class VideoWidget(QLabel):
         Args:
             painter: Active QPainter object (caller must call end() after)
         """
-        # Draw semi-transparent background for FPS counter
-        fps_text = f"FPS: {self.fps}"
-        font = QFont("Arial", 12)
+        # Prepare text lines
+        lines = [f"FPS: {self.fps}"]
+        if self.stream_info:
+            if 'resolution' in self.stream_info:
+                lines.append(f"Resolution: {self.stream_info['resolution']}")
+            if 'codec' in self.stream_info:
+                lines.append(f"Codec: {self.stream_info['codec'].upper()}")
+        
+        font = QFont("Arial", 10)
         font.setBold(True)
         painter.setFont(font)
         
-        # Calculate text dimensions
+        # Calculate dimensions
         metrics = painter.fontMetrics()
-        text_width = metrics.horizontalAdvance(fps_text)
-        text_height = metrics.height()
+        max_width = max(metrics.horizontalAdvance(line) for line in lines)
+        line_height = metrics.height()
+        total_height = line_height * len(lines)
         
         # Position in top-right corner with padding
-        padding = 10
-        x = self.width() - text_width - padding * 2
+        padding = 8
+        x = self.width() - max_width - padding * 2
         y = padding
         
         # Draw semi-transparent background
-        bg_color = QColor(0, 0, 0, 150)  # Semi-transparent black
-        painter.fillRect(x - padding, y - padding, text_width + padding * 2, text_height + padding, bg_color)
+        bg_color = QColor(0, 0, 0, 150)
+        painter.fillRect(x - padding, y - padding, max_width + padding * 2, total_height + padding * 2, bg_color)
         
-        # Draw text
+        # Draw text lines
         painter.setPen(QColor("white"))
-        painter.drawText(x, y + text_height - 3, fps_text)
+        for i, line in enumerate(lines):
+            painter.drawText(x, y + (i + 1) * line_height - 3, line)
 
     def update_fps(self):
         """Update FPS counter."""
@@ -125,11 +136,26 @@ class VideoWidget(QLabel):
         self.frame_count = 0
 
     def clear_display(self):
-        """Clear the video display."""
-        self.clear()
+        """Clear the video display and show black screen."""
+        # Create black pixmap
+        black_pixmap = QPixmap(self.width(), self.height())
+        black_pixmap.fill(QColor("black"))
+        self.setPixmap(black_pixmap)
+        
+        # Reset counters
         self.frame_count = 0
         self.fps = 0
+        self.stream_info = {}
         self.is_connecting = False
+
+    def set_stream_info(self, info: dict):
+        """
+        Set stream information (resolution, codec, etc.).
+        
+        Args:
+            info: Dictionary with 'resolution', 'codec', 'fps' keys
+        """
+        self.stream_info = info
 
     def set_connecting(self, is_connecting: bool):
         """

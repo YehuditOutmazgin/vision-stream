@@ -89,7 +89,8 @@ class FrameBuffer:
     def stop_watchdog(self):
         """Stop the watchdog monitoring thread."""
         self.watchdog_running = False
-        if self.watchdog_thread:
+        # If we're inside the watchdog thread itself, don't call join on it
+        if self.watchdog_thread and threading.current_thread() is not self.watchdog_thread:
             self.watchdog_thread.join(timeout=1)
         self.logger.log_ui_event("Watchdog stopped")
 

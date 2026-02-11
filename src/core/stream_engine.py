@@ -49,6 +49,8 @@ class RTSPStreamEngine(QObject):
         self.height = None
         self.connection_timeout = Config.RTSP_TIMEOUT
         self.interrupt_event = threading.Event()  # For graceful interruption
+        # Thread that handles the (potentially slow) initial connection so the GUI stays responsive
+        self._connect_thread: Optional[threading.Thread] = None
         
     def add_frame_callback(self, callback: Callable[[np.ndarray], Any]):
         """
@@ -90,166 +92,114 @@ class RTSPStreamEngine(QObject):
     def start(self) -> bool:
         """
         Start the RTSP stream or Local Webcam capture.
+        This method is intentionally non-blocking so the GUI thread stays responsive.
         """
         if self.is_running:
             logger.log_ui_event("Stream is already running")
             return True
-            
-        try:
-            # בדיקה האם מדובר במצלמה מקומית (מתחיל ב-video= או שזה רק מספר)
-            is_webcam = "video=" in self.rtsp_url or self.rtsp_url.isdigit()
-            
-            options = Config.FFMPEG_OPTIONS.copy()
-            
-            if is_webcam:
-                # הגדרות ספציפיות למצלמת מחשב בווינדוס
-                logger.log_ui_event(f"Attempting to open webcam: {self.rtsp_url}")
-                self.container = av.open(
-                    self.rtsp_url,
-                    format='dshow',  # חובה עבור מצלמות Windows
-                    options={'framerate': '30'} # מבקש מהמצלמה 30 FPS
-                )
-            else:
-                # הגדרות רגילות ל-RTSP
-                options.update({
-                    'rtsp_transport': 'tcp',
-                    'stimeout': '5000000',
-                    'allowed_media_types': 'video',
-                    'buffer_size': '2048000',
-                })
-                self.container = av.open(
-                    self.rtsp_url,
-                    options=options,
-                    timeout=self.connection_timeout
-                )
-            
-            # Find video stream
-            if not self.container or len(self.container.streams.video) == 0:
-                raise ValueError("No video streams found in the provided URL/Device")
 
-            self.stream = self.container.streams.video[0]
-            
-            # Get codec information
-            self.codec_name = self.stream.codec_context.name
-            self.width = self.stream.width
-            self.height = self.stream.height
-            
-            # תיקון קטן עבור מצלמות שלא מדווחות FPS בצורה תקינה
+        # Clear interrupt indicator from previous sessions
+        self.interrupt_event.clear()
+
+        # Mark as "running" now so GUI button changes to "Stop"
+        self.is_running = True
+
+        def _connect_and_start():
+            """
+            Runs in a background thread: opens the container and starts the
+            frame capture thread. Any errors are sent back via Qt signals.
+            """
             try:
-                self.fps = float(self.stream.average_rate) or 30
-            except:
-                self.fps = 30
-            
-            # Log connection and codec info
-            logger.log_connection(self.rtsp_url)
-            logger.log_codec_info(self.codec_name, f"{self.width}x{self.height}", int(self.fps))
-            
-            # Emit connection established signal
-            self.connection_established.emit({
-                'codec': self.codec_name,
-                'resolution': f"{self.width}x{self.height}",
-                'fps': int(self.fps)
-            })
-            
-            # בבדיקת מצלמה אנחנו מוותרים על בדיקת התמיכה ב-Codec כי זה משתנה בין מצלמות
-            if not is_webcam and self.codec_name.lower() not in Config.SUPPORTED_CODECS:
-                logger.log_codec_error(self.codec_name)
-                self.error_occurred.emit(f"Unsupported codec: {self.codec_name}")
-                return False
-            
-            self.is_running = True
-            self.frame_count = 0
-            self.last_frame_time = time.time()
-            
-            self.capture_thread = threading.Thread(
-                target=self._capture_frames,
-                daemon=True,
-                name="RTSPStreamCapture"
-            )
-            self.capture_thread.start()
-            
-            return True
-            
-        except Exception as e:
-            logger.log_error("CONNECTION_ERROR", f"Failed to open stream: {e}", "ERR_STREAM_OPEN")
-            self.error_occurred.emit(f"Connection error: {str(e)}")
-            return False
-    # def start(self) -> bool:
-    #     """
-    #     Start the RTSP stream capture with PyAV/FFmpeg.
-        
-    #     Returns:
-    #         True if stream started successfully, False otherwise
-    #     """
-    #     if self.is_running:
-    #         logger.log_ui_event("Stream is already running")
-    #         return True
-            
-    #     try:
-    #         # Open RTSP stream with low-latency FFmpeg options
-    #         options = Config.FFMPEG_OPTIONS.copy()
-    #         options.update({
-    #             'rtsp_transport': 'tcp',  # כפיית TCP למניעת "Invalid Data"
-    #             'stimeout': '5000000',  # פסק זמן של 5 שניות (במיקרו-שניות)
-    #             'allowed_media_types': 'video',  # התעלמות מאודיו כדי לחסוך משאבים
-    #             'buffer_size': '2048000',  # הגדלת באפר ליציבות
-    #         })
-    #         self.container = av.open(
-    #             self.rtsp_url,
-    #             options=options,
-    #             timeout=self.connection_timeout
-    #         )
-            
-    #         # Find video stream
-    #         if not self.container or len(self.container.streams.video) == 0:
-    #             raise ValueError("No video streams found in the provided URL")
+                # Check if this is a local webcam (starts with video= or is just a number)
+                is_webcam = "video=" in self.rtsp_url or self.rtsp_url.isdigit()
 
-    #         self.stream = self.container.streams.video[0]
-            
-    #         # Get codec information
-    #         self.codec_name = self.stream.codec_context.name
-    #         self.width = self.stream.width
-    #         self.height = self.stream.height
-    #         self.fps = float(self.stream.average_rate) or 30
-            
-    #         # Log connection and codec info
-    #         logger.log_connection(self.rtsp_url)
-    #         logger.log_codec_info(
-    #             self.codec_name,
-    #             f"{self.width}x{self.height}",
-    #             int(self.fps)
-    #         )
-            
-    #         # Emit connection established signal
-    #         self.connection_established.emit({
-    #             'codec': self.codec_name,
-    #             'resolution': f"{self.width}x{self.height}",
-    #             'fps': int(self.fps)
-    #         })
-            
-    #         # Validate codec support
-    #         if self.codec_name.lower() not in Config.SUPPORTED_CODECS:
-    #             logger.log_codec_error(self.codec_name)
-    #             self.error_occurred.emit(f"Unsupported codec: {self.codec_name}")
-    #             return False
-            
-    #         self.is_running = True
-    #         self.frame_count = 0
-    #         self.last_frame_time = time.time()
-            
-    #         self.capture_thread = threading.Thread(
-    #             target=self._capture_frames,
-    #             daemon=True,
-    #             name="RTSPStreamCapture"
-    #         )
-    #         self.capture_thread.start()
-            
-    #         return True
-            
-    #     except Exception as e:
-    #         logger.log_error("CONNECTION_ERROR", f"Failed to open RTSP stream: {e}", "ERR_RTSP_OPEN")
-    #         self.error_occurred.emit(f"Connection error: {str(e)}")
-    #         return False
+                options = Config.FFMPEG_OPTIONS.copy()
+
+                if is_webcam:
+                    # Specific settings for Windows webcam
+                    logger.log_ui_event(f"Attempting to open webcam: {self.rtsp_url}")
+                    self.container = av.open(
+                        self.rtsp_url,
+                        format='dshow',  # Required for Windows cameras
+                        options={'framerate': '30'}  # Request 30 FPS from camera
+                    )
+                else:
+                    # Regular RTSP settings
+                    options.update({
+                        'rtsp_transport': 'tcp',
+                        'stimeout': '5000000',
+                        'allowed_media_types': 'video',
+                        'buffer_size': '2048000',
+                    })
+                    self.container = av.open(
+                        self.rtsp_url,
+                        options=options,
+                        timeout=self.connection_timeout
+                    )
+
+                # Find video stream
+                if not self.container or len(self.container.streams.video) == 0:
+                    raise ValueError("No video streams found in the provided URL/Device")
+
+                self.stream = self.container.streams.video[0]
+
+                # Get codec information
+                self.codec_name = self.stream.codec_context.name
+                self.width = self.stream.width
+                self.height = self.stream.height
+
+                # Small fix for cameras that don't report FPS properly
+                try:
+                    self.fps = float(self.stream.average_rate) or 30
+                except Exception:
+                    self.fps = 30
+
+                # Log connection and codec info
+                logger.log_connection(self.rtsp_url)
+                logger.log_codec_info(self.codec_name, f"{self.width}x{self.height}", int(self.fps))
+
+                # Emit connection established signal
+                self.connection_established.emit({
+                    'codec': self.codec_name,
+                    'resolution': f"{self.width}x{self.height}",
+                    'fps': int(self.fps)
+                })
+
+                # For webcam testing, skip codec support check as it varies between cameras
+                if not is_webcam and self.codec_name.lower() not in Config.SUPPORTED_CODECS:
+                    logger.log_codec_error(self.codec_name)
+                    self.error_occurred.emit(f"Unsupported codec: {self.codec_name}")
+                    # Stop gracefully to clean up resources
+                    self.stop()
+                    return
+
+                self.frame_count = 0
+                self.last_frame_time = time.time()
+
+                # Start the loop that reads frames in a separate thread
+                self.capture_thread = threading.Thread(
+                    target=self._capture_frames,
+                    daemon=True,
+                    name="RTSPStreamCapture"
+                )
+                self.capture_thread.start()
+
+            except Exception as e:
+                # Connection error - notify GUI and clean up state
+                logger.log_error("CONNECTION_ERROR", f"Failed to open stream: {e}", "ERR_STREAM_OPEN")
+                self.error_occurred.emit(f"Connection error: {str(e)}")
+                self.stop()
+
+        # Start connection in background thread
+        self._connect_thread = threading.Thread(
+            target=_connect_and_start,
+            daemon=True,
+            name="RTSPConnect"
+        )
+        self._connect_thread.start()
+
+        # Immediately return control to GUI
+        return True
     
     def stop(self):
         """

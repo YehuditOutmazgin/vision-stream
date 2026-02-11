@@ -6,6 +6,7 @@ Supports flexible RTSP URL formats including credentials, optional port, and opt
 import re
 from typing import Tuple
 from urllib.parse import urlparse
+from .config import Config
 
 
 class URLValidator:
@@ -37,8 +38,9 @@ class URLValidator:
         """
         # Check if empty
         if not url or not url.strip():
-            return False, "URL cannot be empty"
-        return True, ""
+            # Use centralized message from Config to maintain consistency
+            return False, Config.ERROR_MESSAGES.get("EMPTY_URL", "URL cannot be empty")
+
         url = url.strip()
 
         # Check if starts with rtsp://

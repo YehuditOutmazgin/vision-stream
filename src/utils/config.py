@@ -38,7 +38,7 @@ class Config:
     }
     
     # Video Configuration
-    SUPPORTED_CODECS = ["h264", "hevc", "h265"]
+    SUPPORTED_CODECS = ["h264", "hevc", "h265", "mpeg4", "msmpeg4v3", "h263"]
     TARGET_PIXEL_FORMAT = "rgb24"
     STRICT_LATEST_FRAME = True  # Strict Latest Frame Policy (Req 6.7)
     
@@ -47,6 +47,9 @@ class Config:
     WINDOW_HEIGHT = 720
     MIN_WINDOW_WIDTH = 640
     MIN_WINDOW_HEIGHT = 480
+    # Default webcam device string for Windows/DirectShow
+    # Can be customized to camera name in system, e.g.: "video=Integrated Camera"
+    DEFAULT_WEBCAM_DEVICE = "video=Integrated Camera"
     
     # FPS Display
     FPS_UPDATE_INTERVAL = 1000  # milliseconds

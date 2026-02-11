@@ -20,6 +20,9 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+MANIFEST.in
+pip-log.txt
+pip-delete-this-directory.txt
 
 # --- Virtual Environments ---
 .venv/
@@ -39,6 +42,18 @@ ENV.bak/
 .project
 .pydevproject
 .settings/
+*.code-workspace
+
+# --- Testing & Coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
 
 # --- Logs ---
 logs/
@@ -53,25 +68,36 @@ error_logs/
 *.mov
 *.flv
 *.wmv
+*.webm
 
 # --- Configuration & Secrets ---
 .env
+.env.local
 config_local.py
 secrets.json
+*.pem
+*.key
 
 # --- PyInstaller & Distribution ---
-# If you want to keep your .spec files, comment the first line
-# *.spec
-# Already covered by Python base but kept for clarity
+# Keep .spec files for build configuration
 build/
 dist/
+*.manifest
+*.spec.bak
 
 # --- OS Specific ---
 .DS_Store
 Thumbs.db
 desktop.ini
+$RECYCLE.BIN/
 
 # --- Project Specific Outputs ---
 # If your app creates snapshots or recordings
 recordings/
 snapshots/
+
+# --- Temporary Files ---
+*.tmp
+*.temp
+*.bak
+*.cache

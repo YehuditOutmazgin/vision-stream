@@ -1,153 +1,247 @@
 import sys
 import os
-import numpy as np
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLineEdit, QPushButton, QLabel, QMessageBox)
-from PySide6.QtCore import Qt, Slot
-from PySide6.QtGui import QImage, QPixmap
 
-# Add src directory to path for imports
+from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QObject, Slot
+
+# Ensure src directory is on sys.path for module imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.stream_engine import RTSPStreamEngine
-from utils.config import Config
+from core.reconnection_manager import ReconnectionManager, StreamState
+from core.frame_buffer import FrameBuffer
+from gui.main_window import MainWindow
+from gui.error_display import ErrorDialog
 from utils.url_validator import URLValidator
 from utils.logger import get_logger
 
-class VideoWidget(QLabel):
-    def __init__(self):
-        super().__init__()
-        self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet("background-color: black;")
-        self.setText("No Stream")
-        self.setMinimumSize(Config.MIN_WINDOW_WIDTH, Config.MIN_WINDOW_HEIGHT)
 
-    @Slot(np.ndarray)
-    def update_frame(self, frame_array):
-        height, width, channel = frame_array.shape
-        bytes_per_line = 3 * width
-        
-        q_img = QImage(frame_array.data, width, height, bytes_per_line, QImage.Format_RGB888)
-        
-        pixmap = QPixmap.fromImage(q_img)
-        scaled_pixmap = pixmap.scaled(
-            self.size(), 
-            Qt.KeepAspectRatio, 
-            Qt.SmoothTransformation
-        )
-        self.setPixmap(scaled_pixmap)
+class StreamController(QObject):
+    """
+    Connects MainWindow to RTSPStreamEngine according to specification.
+    Wires FrameBuffer + ReconnectionManager:
+    - FrameBuffer: Strict Latest Frame Policy + Watchdog on stream
+    - ReconnectionManager: Manages reconnection attempts with backoff
+    """
 
-
-class VisionStreamApp(QMainWindow):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, window: MainWindow):
+        super().__init__(window)
+        self.window = window
+        self.engine: RTSPStreamEngine | None = None
+        self.current_url: str | None = None
         self.logger = get_logger()
-        self.engine = None
-        self.init_ui()
 
-    def init_ui(self):
-        self.setWindowTitle(f"{Config.APP_NAME} v{Config.APP_VERSION}")
-        self.resize(Config.WINDOW_WIDTH, Config.WINDOW_HEIGHT)
+        # Single-frame buffer + watchdog
+        self.frame_buffer = FrameBuffer()
+        self.frame_buffer.on_frame_ready = self._on_buffer_frame_ready
+        self.frame_buffer.on_timeout = self._on_frame_timeout
 
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
+        # Reconnection state machine
+        self.reconnect_manager = ReconnectionManager()
+        self.reconnect_manager.on_state_changed = self._on_state_changed
+        self.reconnect_manager.on_reconnect_attempt = self._on_reconnect_attempt
+        self.reconnect_manager.on_max_retries_exceeded = self._on_max_retries_exceeded
 
-        # Control Layout
-        ctrl_layout = QHBoxLayout()
-        self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("Enter RTSP URL, Local File path, or 'video=0' for Webcam")
+        # Connect signals from GUI
+        self.window.play_requested.connect(self.on_play_requested)
+        self.window.stop_requested.connect(self.on_stop_requested)
 
-        # New: Button for local files
-        self.file_btn = QPushButton("Open File")
-        self.file_btn.clicked.connect(self.handle_select_file)
+    # ---------- GUI event handlers ----------
 
-        # New: Button for local webcam
-        self.webcam_btn = QPushButton("Webcam")
-        self.webcam_btn.clicked.connect(self.handle_use_webcam)
+    @Slot(str)
+    def on_play_requested(self, url: str):
+        """Handle Play from UI with centralized URL validation.
 
-        self.play_btn = QPushButton("Play")
-        self.play_btn.clicked.connect(self.handle_play_stop)
-
-        self.fps_label = QLabel("FPS: 0")
-        self.fps_label.setStyleSheet("color: #00FF00; font-weight: bold;")
-
-        # Adding widgets to layout
-        ctrl_layout.addWidget(self.url_input)
-        ctrl_layout.addWidget(self.file_btn)
-        ctrl_layout.addWidget(self.webcam_btn)
-        ctrl_layout.addWidget(self.play_btn)
-        ctrl_layout.addWidget(self.fps_label)
-
-        self.video_display = VideoWidget()
-
-        main_layout.addLayout(ctrl_layout)
-        main_layout.addWidget(self.video_display)
-
-    @Slot()
-    def handle_select_file(self):
+        Supports three input types:
+        1. Valid RTSP URL (rtsp://...) - validated by URLValidator
+        2. Local path to existing video file
+        3. Local webcam (e.g. "video=0" or "0")
         """
-        Open file dialog and set the path to the input field.
-        """
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Video", "", "Video Files (*.mp4 *.avi *.mkv *.mov);;All Files (*.*)"
-        )
-        if file_path:
-            self.url_input.setText(file_path)
+        raw_url = (url or "").strip()
 
-    @Slot()
-    def handle_use_webcam(self):
-        """
-        Set default webcam device string to the input field.
-        """
-        self.url_input.setText("video=0")
+        # 1) Existing local file
+        is_local_path = os.path.exists(raw_url)
 
-    def handle_play_stop(self):
-        if self.engine and self.engine.is_running:
-            self.stop_stream()
-        else:
-            self.start_stream()
-
-    def start_stream(self):
-        url = self.url_input.text().strip()
-
-        # Validation bypass for local files and webcam devices
-        is_local_path = os.path.exists(url)
-        is_webcam = "video=" in url or url.isdigit()
+        # 2) Local webcam (DirectShow / index)
+        lower_url = raw_url.lower()
+        is_webcam = lower_url.startswith("video=") or lower_url.isdigit()
 
         if not (is_local_path or is_webcam):
-            is_valid, error_msg = URLValidator.validate(url)
+            # 3) Must be valid RTSP URL
+            is_valid, error_msg = URLValidator.validate(raw_url)
             if not is_valid:
-                QMessageBox.warning(self, "Validation Error", error_msg)
+                ErrorDialog.show_validation_error(self.window, error_msg)
+                self.logger.log_validation_error(error_msg)
                 return
 
-        self.engine = RTSPStreamEngine(url)
-        self.engine.frame_ready.connect(self.video_display.update_frame)
-        self.engine.fps_updated.connect(lambda fps: self.fps_label.setText(f"FPS: {fps:.2f}"))
-        self.engine.error_occurred.connect(self.handle_error)
+        self.current_url = raw_url
 
-        if self.engine.start():
-            self.play_btn.setText("Stop")
-            self.url_input.setEnabled(False)
-            self.file_btn.setEnabled(False)
-            self.webcam_btn.setEnabled(False)
+        # Start connection state machine
+        self.reconnect_manager.start_connection()
+        self.window.set_connecting()
+        self._start_engine()
+
+    @Slot()
+    def on_stop_requested(self):
+        """Handle Stop from UI (user clicked Stop)."""
+        self.reconnect_manager.user_stop()
+        self._stop_engine()
+        self.window.set_stopped()
+
+    # ---------- Engine lifecycle ----------
+
+    def _start_engine(self):
+        """Create and start the stream engine for the current URL."""
+        if not self.current_url:
+            return
+
+        # Ensure existing engine is stopped
+        self._stop_engine()
+
+        self.engine = RTSPStreamEngine(self.current_url)
+
+        # Instead of feeding VideoWidget directly, pass through FrameBuffer
+        self.engine.frame_ready.connect(self._on_engine_frame)
+        self.engine.error_occurred.connect(self.on_engine_error)
+        self.engine.connection_established.connect(self.on_connection_established)
+
+        # Reset and use watchdog
+        self.frame_buffer.clear()
+        self.frame_buffer.start_watchdog()
+
+        # start() is asynchronous - returns immediately, results via signals
+        started = self.engine.start()
+        if started:
+            self.logger.log_ui_event(f"Starting stream for URL: {self.current_url}")
         else:
-            pass
+            # If immediate error occurs, wait for error_occurred, but keep UI consistent
+            self.window.set_error("Failed to start stream")
 
-    def stop_stream(self):
+    def _stop_engine(self):
+        """Stop and clean up the current stream engine."""
+        # Stop watchdog
+        self.frame_buffer.stop_watchdog()
+        self.frame_buffer.clear()
+
         if self.engine:
+            # Disconnect signals to ensure no more frames arrive after stop
+            try:
+                self.engine.frame_ready.disconnect(self._on_engine_frame)
+            except Exception:
+                pass
+            try:
+                self.engine.error_occurred.disconnect(self.on_engine_error)
+            except Exception:
+                pass
+            try:
+                self.engine.connection_established.disconnect(self.on_connection_established)
+            except Exception:
+                pass
+
             self.engine.stop()
             self.engine = None
 
-        self.play_btn.setText("Play")
-        self.url_input.setEnabled(True)
-        self.file_btn.setEnabled(True)
-        self.webcam_btn.setEnabled(True)
-        self.video_display.clear()
-        self.video_display.setText("Stream Stopped")
-        self.fps_label.setText("FPS: 0")
+    # ---------- Engine signal handlers ----------
+
+    @Slot(dict)
+    def on_connection_established(self, info: dict):
+        """Called when the engine successfully connects."""
+        codec = info.get("codec", "unknown")
+        resolution = info.get("resolution", "unknown")
+        fps = info.get("fps", 0)
+        self.logger.log_codec_info(codec, resolution, fps)
+
+        # Update state machine
+        self.reconnect_manager.connection_success()
+        # Reset watchdog timer
+        self.frame_buffer.reset_frame_timer()
+        
+        # Pass stream info to video widget
+        self.window.video_widget.set_stream_info(info)
+
+    @Slot(str)
+    def on_engine_error(self, error_message: str):
+        """Handle errors emitted by the stream engine."""
+        self.logger.log_connection_error(error_message)
+        
+        # Check if it's a codec error - don't retry codec errors
+        if "codec" in error_message.lower():
+            # Codec error - stop completely, don't retry
+            self._stop_engine()
+            self.window.set_error(error_message)
+            return
+        
+        # For other errors, try reconnecting via ReconnectionManager
+        self._stop_engine()
+        self.reconnect_manager.connection_failed(error_message)
+
+    @Slot()
+    def _on_frame_timeout(self):
+        """Called by FrameBuffer watchdog when no frames arrive for too long."""
+        self.logger.log_timeout(0)
+        # Notify state machine that stream interrupted - it will handle retry
+        self._stop_engine()
+        self.reconnect_manager.stream_interrupted()
+
+    @Slot()
+    def _on_buffer_frame_ready(self):
+        """Called when FrameBuffer has a new frame ready for display."""
+        frame = self.frame_buffer.get_frame()
+        if frame is not None:
+            self.window.video_widget.display_frame(frame)
+
+    @Slot(object)
+    def _on_engine_frame(self, frame):
+        """
+        Receive frame from engine, push to FrameBuffer (Strict Latest Frame Policy).
+        """
+        self.frame_buffer.put_frame(frame)
+
+    # ---------- ReconnectionManager callbacks ----------
+
+    def _on_state_changed(self, state: StreamState):
+        """Update GUI based on high-level stream state."""
+        if state == StreamState.CONNECTING:
+            self.window.set_connecting()
+        elif state == StreamState.PLAYING:
+            self.window.set_playing()
+        elif state == StreamState.IDLE:
+            self.window.set_stopped()
+        elif state == StreamState.ERROR:
+            # Final error state - on_max_retries_exceeded will show message
+            pass
+
+    def _on_reconnect_attempt(self, attempt: int, wait_time: int):
+        """
+        Called by ReconnectionManager before next connection attempt.
+        After internal wait, arrange new start attempt.
+        """
+        # Wait already performed inside ReconnectionManager, just try opening engine again
+        self.logger.log_reconnect_attempt(attempt, wait_time)
+        if self.current_url:
+            self._start_engine()
+
+    def _on_max_retries_exceeded(self):
+        """Handle case where automatic reconnection gave up."""
+        message = "Maximum reconnection attempts exceeded.\n\nPlease check the RTSP URL or network and try again."
+        self.window.set_error(message)
+        # Show popup only after all attempts exhausted
+        ErrorDialog.show_connection_error(self.window, message, "ERR_MAX_RETRIES")
+        self._stop_engine()
+
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = VisionStreamApp()
+    window = MainWindow()
+    controller = StreamController(window)
+    window.show()
+    sys.exit(app.exec())
+
+
+def main():
+    """Entry point for console script."""
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    controller = StreamController(window)
     window.show()
     sys.exit(app.exec())

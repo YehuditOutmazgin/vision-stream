@@ -1,8 +1,8 @@
-# Requirements Document: RTSP Desktop Player
+# Requirements Document: VisionStream Desktop Player
 
 ## Introduction
 
-VisionStream RTSP Viewer - A high-performance, native desktop video player for Windows built with Python 3.11, PySide6, and PyAV (FFmpeg backend). The application is designed for professional use with ultra-low latency streaming, supporting H.264/H.265 codecs over RTSP protocol. The architecture emphasizes thread-safe operations, zero-copy frame handling, NumPy integration, and responsive UI even under network stress conditions.
+VisionStream - A high-performance, native desktop video player for Windows built with Python 3.11, PySide6, and PyAV (FFmpeg backend). The application supports **RTSP streams**, **local video files**, and **webcams** with ultra-low latency streaming, supporting H.264/H.265 codecs. The architecture emphasizes thread-safe operations, zero-copy frame handling, NumPy integration, asynchronous connection handling, and responsive UI even under network stress conditions.
 
 **Technology Stack:**
 - **GUI Framework:** PySide6 (Qt 6 for Python)
@@ -35,17 +35,21 @@ VisionStream RTSP Viewer - A high-performance, native desktop video player for W
 
 ## Requirements
 
-### Requirement 1: RTSP URL Input
+### Requirement 1: Multi-Source Input Support
 
-**User Story:** As a user, I want to enter an RTSP stream URL into the application, so that I can specify which video stream to play.
+**User Story:** As a user, I want to input different video sources (RTSP, local files, webcams), so that I can view various types of video content.
 
 #### Acceptance Criteria
 
-1. WHEN the application starts, THE Player SHALL display a text input field for entering RTSP URLs
-2. WHEN a user types an RTSP URL into the input field, THE Player SHALL accept and store the URL
-3. WHEN a user attempts to enter an empty URL, THE Player SHALL prevent submission and maintain the current state
-4. WHEN a user enters a malformed URL, THE Player SHALL validate the format using regex pattern: `rtsp://[host]:[port]/[path]` and provide feedback
-5. WHEN a user enters a valid URL format, THE Player SHALL accept it and enable the Play button
+1. WHEN the application starts, THE Player SHALL display a text input field for entering video source URLs/paths
+2. WHEN a user enters an RTSP URL (e.g., `rtsp://host:port/path`), THE Player SHALL accept and validate it
+3. WHEN a user enters a local file path (e.g., `C:\Videos\sample.mp4`), THE Player SHALL accept and validate it
+4. WHEN a user enters a webcam identifier (e.g., `video=Integrated Camera` or `0`), THE Player SHALL accept it
+5. WHEN a user attempts to enter an empty URL, THE Player SHALL prevent submission and maintain the current state
+6. WHEN a user enters a malformed RTSP URL, THE Player SHALL validate the format and provide feedback
+7. WHEN the start() method is called, THE Player SHALL initiate connection asynchronously in a background thread to keep the GUI responsive
+8. WHEN connection is in progress, THE Player SHALL allow the GUI to remain interactive and responsive
+9. WHEN connection succeeds or fails, THE Player SHALL notify the GUI via Qt signals (connection_established or error_occurred)
 
 ### Requirement 2: Playback Control
 
@@ -187,6 +191,23 @@ VisionStream RTSP Viewer - A high-performance, native desktop video player for W
 3. WHEN the .exe is executed, THE Player SHALL include all required FFmpeg DLLs and dependencies bundled together
 4. WHEN the application is distributed, THE Player SHALL include a README with installation and usage instructions
 5. WHEN the application runs, THE Player SHALL create a logs directory in the application folder for diagnostic files
+
+## Known Limitations
+
+1. **RTSP External Streams**: Connection stability and latency depend heavily on:
+   - Network conditions (bandwidth, packet loss, jitter)
+   - Firewall and NAT configurations
+   - Router port forwarding settings
+   - ISP throttling policies
+   - Local network streams typically achieve <500ms latency, but internet streams may vary significantly
+
+2. **Codec Support**: Currently limited to H.264 and H.265/HEVC. Other codecs (VP9, AV1, MJPEG) are not supported.
+
+3. **Webcam Platform Support**: Webcam support is Windows-only via DirectShow. Linux (V4L2) and macOS (AVFoundation) are not yet implemented.
+
+4. **Single Stream Limitation**: Only one stream can be active at a time. Multi-stream grid view is planned for Phase 2.
+
+5. **Asynchronous Connection**: The start() method returns immediately and performs connection in a background thread. Errors are reported via Qt signals, not return values.
 
 ## System Architecture Diagram
 
