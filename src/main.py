@@ -223,7 +223,7 @@ class StreamController(QObject):
 
     def _on_max_retries_exceeded(self):
         """Handle case where automatic reconnection gave up."""
-        message = "Maximum reconnection attempts exceeded.\n\nPlease check the RTSP URL or network and try again."
+        message = "Maximum reconnection attempts exceeded.\n\nPlease check the URL or network and try again."
         self.window.set_error(message)
         # Show popup only after all attempts exhausted
         ErrorDialog.show_connection_error(self.window, message, "ERR_MAX_RETRIES")

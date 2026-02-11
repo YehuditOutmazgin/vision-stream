@@ -1,0 +1,23 @@
+High-performance RTSP desktop client with ultra-low latency streaming.
+
+## Key Features
+- Ultra-low latency (<500ms on LAN)
+- Automatic reconnection with exponential backoff
+- Real-time FPS monitoring
+- Multiple input sources (RTSP, files, webcams)
+- Zero-copy frame decoding
+- Comprehensive error handling
+
+## Installation
+1. Download VisionStream-v1.0.0.zip
+2. Extract the entire folder
+3. Run VisionStream.exe
+
+No Python installation required!
+
+## Tech Stack
+- Python 3.10+ with PySide6 (Qt)
+- PyAV (FFmpeg C-bindings)
+- NumPy (zero-copy processing)
+
+Full documentation: https://github.com/yehuditOutmazgin/vision-stream

@@ -57,17 +57,17 @@ class MainWindow(QMainWindow):
 
         # Convenience buttons for local file and webcam
         self.open_file_button = QPushButton("Open File")
-        self.webcam_button = QPushButton("Webcam")
+        self.list_webcams_button = QPushButton("List Cameras")
 
         # Connect button signals
         self.play_button.clicked.connect(self._on_play_stop_clicked)
         self.open_file_button.clicked.connect(self._on_open_file_clicked)
-        self.webcam_button.clicked.connect(self._on_webcam_clicked)
+        self.list_webcams_button.clicked.connect(self._on_list_webcams_clicked)
 
         control_layout.addWidget(url_label)
         control_layout.addWidget(self.url_input)
         control_layout.addWidget(self.open_file_button)
-        control_layout.addWidget(self.webcam_button)
+        control_layout.addWidget(self.list_webcams_button)
         control_layout.addWidget(self.play_button)
 
         # Video widget
@@ -110,20 +110,63 @@ class MainWindow(QMainWindow):
 
         url = url.strip()
 
-        # 1) Local file path
-        if os.path.exists(url):
-            return True
-
-        # 2) Webcam device ("video=0" / "0")
+        # 1) Webcam device ("video=0" / "0") - check first
         lower_url = url.lower()
         if lower_url.startswith("video=") or lower_url.isdigit():
             return True
 
-        # 3) RTSP URL – enforce RTSP pattern
-        if not url.lower().startswith("rtsp://") or not self.RTSP_URL_PATTERN.match(url):
+        # 2) RTSP URL
+        if url.lower().startswith("rtsp://"):
+            if not self.RTSP_URL_PATTERN.match(url):
+                ErrorDialog.show_validation_error(
+                    self,
+                    "Invalid RTSP URL format.\n\nExpected format: rtsp://host:port/path"
+                )
+                return False
+            return True
+
+        # 3) Check for unsupported protocols
+        unsupported_protocols = ['http://', 'https://', 'ftp://', 'file://']
+        for protocol in unsupported_protocols:
+            if url.lower().startswith(protocol):
+                ErrorDialog.show_validation_error(
+                    self,
+                    f"Unsupported protocol.\n\nOnly RTSP streams are supported. Use rtsp:// instead of {protocol}"
+                )
+                return False
+
+        # 4) Local file path - check if it looks like a path
+        looks_like_path = ('/' in url or '\\' in url or ':' in url or '.' in url)
+        
+        if not looks_like_path:
             ErrorDialog.show_validation_error(
                 self,
-                "Invalid URL format.\n\nExpected format: rtsp://host:port/path"
+                "Invalid input.\n\nExpected RTSP URL (rtsp://...) or file path (C:/path/to/video.mp4)"
+            )
+            return False
+
+        # Check if file exists
+        if not os.path.exists(url):
+            ErrorDialog.show_validation_error(
+                self,
+                f"File not found:\n\n{url}"
+            )
+            return False
+
+        # Check if it's a file (not directory)
+        if not os.path.isfile(url):
+            ErrorDialog.show_validation_error(
+                self,
+                f"Path is not a file:\n\n{url}"
+            )
+            return False
+
+        # Check file extension
+        video_extensions = ('.mp4', '.avi', '.mkv', '.mov', '.flv', '.wmv', '.m4v', '.mpg', '.mpeg')
+        if not url.lower().endswith(video_extensions):
+            ErrorDialog.show_validation_error(
+                self,
+                f"Unsupported file type.\n\nExpected video file (.mp4, .avi, .mkv, etc.)"
             )
             return False
 
@@ -148,7 +191,7 @@ class MainWindow(QMainWindow):
         self.play_button.setText("Stop")
         self.play_button.setEnabled(True)
         self.open_file_button.setEnabled(False)
-        self.webcam_button.setEnabled(False)
+        self.list_webcams_button.setEnabled(False)
         self.url_input.setReadOnly(True)
         self.status_label.setText("Playing...")
         self.video_widget.set_connecting(False)
@@ -159,7 +202,7 @@ class MainWindow(QMainWindow):
         self.play_button.setText("Play")
         self.play_button.setEnabled(True)
         self.open_file_button.setEnabled(True)
-        self.webcam_button.setEnabled(True)
+        self.list_webcams_button.setEnabled(True)
         self.url_input.setReadOnly(False)
         self.status_label.setText("Ready")
         self.video_widget.clear_display()
@@ -172,7 +215,7 @@ class MainWindow(QMainWindow):
         self.play_button.setText("Stop")
         self.play_button.setEnabled(True)
         self.open_file_button.setEnabled(False)
-        self.webcam_button.setEnabled(False)
+        self.list_webcams_button.setEnabled(False)
         self.url_input.setReadOnly(True)
         self.status_label.setText("Connecting...")
         self.video_widget.set_connecting(True)
@@ -188,7 +231,7 @@ class MainWindow(QMainWindow):
         self.play_button.setText("Play")
         self.play_button.setEnabled(True)
         self.open_file_button.setEnabled(True)
-        self.webcam_button.setEnabled(True)
+        self.list_webcams_button.setEnabled(True)
         self.url_input.setReadOnly(False)
         self.status_label.setText(f"Error: {error_message}")
         self.video_widget.clear_display()
@@ -219,9 +262,33 @@ class MainWindow(QMainWindow):
             if not self.is_playing:
                 self._on_play_stop_clicked()
 
-    def _on_webcam_clicked(self):
-        """Set default webcam device string into the URL field."""
-        self.url_input.setText(Config.DEFAULT_WEBCAM_DEVICE)
-        # Auto-start playback if not already playing
-        if not self.is_playing:
-            self._on_play_stop_clicked()
+    def _on_list_webcams_clicked(self):
+        """List available webcams in a dialog."""
+        from utils.webcam_utils import get_available_webcams
+        from PySide6.QtWidgets import QMessageBox, QInputDialog
+        
+        cameras = get_available_webcams()
+        
+        if not cameras:
+            QMessageBox.information(
+                self,
+                "No Cameras Found",
+                "No webcams detected on this system.\n\nMake sure your camera is connected and enabled."
+            )
+            return
+        
+        # Show selection dialog
+        camera, ok = QInputDialog.getItem(
+            self,
+            "Select Webcam",
+            "Available cameras:",
+            cameras,
+            0,
+            False
+        )
+        
+        if ok and camera:
+            self.url_input.setText(f"video={camera}")
+            # Auto-start playback
+            if not self.is_playing:
+                self._on_play_stop_clicked()

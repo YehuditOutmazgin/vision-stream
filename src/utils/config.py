@@ -67,6 +67,9 @@ class Config:
     ERROR_MESSAGES = {
         "EMPTY_URL": "URL cannot be empty",
         "INVALID_URL_FORMAT": "Invalid URL format. Expected: rtsp://host:port/path",
+        "FILE_NOT_FOUND": "File not found",
+        "INVALID_FILE_TYPE": "Unsupported file type",
+        "WEBCAM_NOT_FOUND": "Webcam device not found",
         "CONNECTION_TIMEOUT": "Connection timeout - server not responding",
         "CONNECTION_REFUSED": "Connection refused - server offline or port closed",
         "UNSUPPORTED_CODEC": "Unsupported video codec",

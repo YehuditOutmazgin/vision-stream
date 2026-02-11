@@ -186,8 +186,28 @@ class RTSPStreamEngine(QObject):
 
             except Exception as e:
                 # Connection error - notify GUI and clean up state
+                error_msg = str(e)
+                
+                # Provide user-friendly error messages
+                if "Invalid data found" in error_msg:
+                    user_msg = "The stream source returned invalid data. Please check the URL or try a different stream."
+                elif "I/O error" in error_msg and "video=" in self.rtsp_url:
+                    # Webcam error - try to provide helpful suggestions
+                    from utils.webcam_utils import get_available_webcams
+                    available = get_available_webcams()
+                    if available:
+                        user_msg = f"Webcam not found. Available cameras: {', '.join(available)}"
+                    else:
+                        user_msg = "Webcam not found. Try using the full camera name (e.g., 'video=Integrated Camera')"
+                elif "Connection refused" in error_msg:
+                    user_msg = "Connection refused. Check if the RTSP server is running and accessible."
+                elif "timed out" in error_msg.lower():
+                    user_msg = "Connection timeout. Check your network connection and firewall settings."
+                else:
+                    user_msg = f"Connection error: {error_msg}"
+                
                 logger.log_error("CONNECTION_ERROR", f"Failed to open stream: {e}", "ERR_STREAM_OPEN")
-                self.error_occurred.emit(f"Connection error: {str(e)}")
+                self.error_occurred.emit(user_msg)
                 self.stop()
 
         # Start connection in background thread
